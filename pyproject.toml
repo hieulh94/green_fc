@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "green-fc"
+version = "0.1.0"
+description = "Lightweight football team management backend"
+authors = ["Your Name <you@example.com>"]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
