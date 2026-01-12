@@ -24,9 +24,15 @@ app.add_middleware(
 )
 
 # Mount static files for uploads
+# In serverless environment, static files may not be available
+# Only mount if directory exists and we're not in serverless mode
 static_dir = Path("static")
-if static_dir.exists():
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+if static_dir.exists() and static_dir.is_dir():
+    try:
+        app.mount("/static", StaticFiles(directory="static"), name="static")
+    except Exception:
+        # Ignore if static files can't be mounted (e.g., in serverless)
+        pass
 
 app.include_router(teams.router)
 app.include_router(players.router)
