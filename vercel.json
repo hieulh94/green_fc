@@ -9,12 +9,8 @@
       "destination": "/static/$1"
     },
     {
-      "source": "/(.*\\.(html|css|js|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot))",
+      "source": "/(.*)",
       "destination": "/frontend/$1"
-    },
-    {
-      "source": "/",
-      "destination": "/frontend/index.html"
     }
   ],
   "headers": [

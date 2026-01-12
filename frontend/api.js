@@ -92,7 +92,12 @@ const uploadAPI = {
         const formData = new FormData();
         formData.append('file', file);
         
-        const response = await fetch(`${API_BASE_URL}/uploads/player-image`, {
+        // Use full URL for uploads to ensure proper handling
+        const uploadUrl = API_BASE_URL.startsWith('http') 
+            ? `${API_BASE_URL}/uploads/player-image`
+            : `${window.location.origin}${API_BASE_URL}/uploads/player-image`;
+        
+        const response = await fetch(uploadUrl, {
             method: 'POST',
             body: formData,
         });
@@ -102,7 +107,12 @@ const uploadAPI = {
             throw new Error(error.detail || `HTTP error! status: ${response.status}`);
         }
         
-        return response.json();
+        const result = await response.json();
+        // Ensure URL is absolute for production
+        if (!result.url.startsWith('http')) {
+            result.url = `${window.location.origin}${result.url}`;
+        }
+        return result;
     },
 };
 

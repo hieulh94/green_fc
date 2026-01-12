@@ -203,9 +203,20 @@ function renderPlayers() {
     container.innerHTML = players.map(player => {
         const positions = Array.isArray(player.position) ? player.position : [player.position];
         const positionsText = positions.join(', ');
-        const imageUrl = player.profile_image 
-            ? (player.profile_image.startsWith('http') ? player.profile_image : `${API_BASE_URL}${player.profile_image}`)
-            : '';
+        let imageUrl = '';
+        if (player.profile_image) {
+            if (player.profile_image.startsWith('http')) {
+                imageUrl = player.profile_image;
+            } else if (player.profile_image.startsWith('/')) {
+                // Absolute path - use current origin
+                imageUrl = `${window.location.origin}${player.profile_image}`;
+            } else {
+                // Relative path - use API base URL
+                imageUrl = API_BASE_URL.startsWith('http') 
+                    ? `${API_BASE_URL}${player.profile_image}`
+                    : `${window.location.origin}${API_BASE_URL}${player.profile_image}`;
+            }
+        }
         
         const hasImage = !!imageUrl;
         const cardClass = hasImage ? 'card card-with-image' : 'card';

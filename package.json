@@ -1,0 +1,12 @@
+{
+  "name": "green-fc",
+  "version": "1.0.0",
+  "description": "Football Team Management System",
+  "scripts": {
+    "deploy": "vercel --prod"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
+
