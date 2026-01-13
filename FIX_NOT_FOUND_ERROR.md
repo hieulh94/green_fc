@@ -28,7 +28,7 @@ Vercel đang match với API trước frontend, và API trả về 404 cho route
 - `https://green-fc.vercel.app/` → Phải hiển thị frontend HTML
 - `https://green-fc.vercel.app/api` → Phải hiển thị API JSON
 - `https://green-fc.vercel.app/api/teams/` → Phải hiển thị API response
-- `https://green-fc.vercel.app/styles.css` → Phải serve CSS file
+- `gihttps://green-fc.vercel.app/styles.css` → Phải serve CSS file
 
 ## 🚀 Next Steps:
 
