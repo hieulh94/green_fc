@@ -1,14 +1,6 @@
 {
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/api",
-      "destination": "/api/index.py"
-    },
-    {
       "source": "/static/(.*)",
       "destination": "/static/$1"
     },
@@ -31,6 +23,14 @@
     {
       "source": "/positions.js",
       "destination": "/frontend/positions.js"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
+    },
+    {
+      "source": "/api",
+      "destination": "/api/index.py"
     },
     {
       "source": "/",
