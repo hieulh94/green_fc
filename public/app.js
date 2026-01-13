@@ -12,6 +12,8 @@ let statsChart = null;
 let goalsBubbleChart = null; // Bubble chart for goal statistics
 let openOpponentModalCallback = null; // Callback khi thêm opponent từ match modal
 let isLoggedIn = false; // Login state
+let goalsTableSortState = { column: 'total', direction: 'desc' }; // 'asc' or 'desc'
+let participationTableSortState = { column: 'rate', direction: 'desc' }; // 'asc' or 'desc'
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -21,8 +23,13 @@ document.addEventListener('DOMContentLoaded', () => {
     setupTabs();
     loadTeams();
     loadPlayers();
-    loadOpponents();
-    loadMatches().then(() => {
+    // Load opponents and matches, then render opponents after both are loaded
+    Promise.all([
+        loadOpponents(),
+        loadMatches()
+    ]).then(() => {
+        // Re-render opponents after matches are loaded to show head-to-head records
+        if (opponents.length > 0) renderOpponents();
         showUpcomingMatchModal(); // Show upcoming match modal after matches are loaded
     });
     setupTabChangeListeners();
@@ -461,13 +468,42 @@ async function loadOpponents() {
     showLoading();
     try {
         opponents = await opponentsAPI.getAll();
-        renderOpponents();
+        // Don't render here - wait for matches to load first
+        // renderOpponents() will be called after both opponents and matches are loaded
         updateOpponentSelects();
     } catch (error) {
         alert('Error loading opponents: ' + error.message);
     } finally {
         hideLoading();
     }
+}
+
+function getOpponentHeadToHead(opponentId) {
+    // Get completed matches for this opponent, sorted by date
+    const opponentMatches = matches
+        .filter(match => match.opponent_id === opponentId && match.is_completed === true)
+        .sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    if (opponentMatches.length === 0) {
+        return null;
+    }
+    
+    // Map result to Vietnamese with colors
+    const resultMap = {
+        'win': { text: 'Thắng', color: '#28a745' }, // Green
+        'lose': { text: 'Thua', color: '#dc3545' }, // Red
+        'draw': { text: 'Hòa', color: '#ffc107' }   // Yellow
+    };
+    
+    // Create head-to-head HTML with colors: "Thắng - Thua - Thắng ..."
+    const headToHead = opponentMatches
+        .map(match => {
+            const result = resultMap[match.result] || { text: match.result, color: '#666' };
+            return `<span style="color: ${result.color}; font-weight: bold;">${result.text}</span>`;
+        })
+        .join(' - ');
+    
+    return headToHead;
 }
 
 function renderOpponents() {
@@ -492,6 +528,9 @@ function renderOpponents() {
             }
         }
         
+        // Get head-to-head record
+        const headToHead = getOpponentHeadToHead(opponent.id);
+        
         return `
         <div class="card">
             <h3>${escapeHtml(opponent.name)}</h3>
@@ -501,6 +540,7 @@ function renderOpponents() {
                 <div style="margin-top: 5px;">${starsHtml}</div>
             </div>
             ${review ? `<div style="margin: 10px 0;"><strong>Nhận xét:</strong><p style="margin-top: 5px; color: #666; font-style: italic;">${escapeHtml(review)}</p></div>` : ''}
+            ${headToHead ? `<div style="margin: 10px 0;"><strong>Thành tích đối đầu:</strong><p style="margin-top: 5px;">${headToHead}</p></div>` : ''}
             <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
                 <button class="btn btn-primary btn-small" onclick="editOpponent(${opponent.id})">Sửa</button>
                 <button class="btn btn-danger btn-small" onclick="deleteOpponent(${opponent.id})">Xóa</button>
@@ -850,13 +890,32 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
         return;
     }
     
+    // Prepare player data with total goals for sorting
+    const playersWithGoals = allPlayers.map(player => {
+        const playerData = playerGoalsMap[player.id];
+        const totalGoals = playerData ? playerData.totalGoals : 0;
+        return {
+            player: player,
+            playerData: playerData,
+            totalGoals: totalGoals
+        };
+    });
+    
+    // Sort players by total goals
+    if (goalsTableSortState.column === 'total') {
+        playersWithGoals.sort((a, b) => {
+            if (goalsTableSortState.direction === 'desc') {
+                return b.totalGoals - a.totalGoals; // High to low
+            } else {
+                return a.totalGoals - b.totalGoals; // Low to high
+            }
+        });
+    }
+    
     // Build table rows
     let tableRows = '';
     
-    allPlayers.forEach(player => {
-        const playerData = playerGoalsMap[player.id];
-        const totalGoals = playerData ? playerData.totalGoals : 0;
-        
+    playersWithGoals.forEach(({ player, playerData, totalGoals }) => {
         let rowCells = `<td><strong>${escapeHtml(player.name)}</strong></td>`;
         
         // If no match dates, just show total
@@ -895,6 +954,10 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
         }).join('');
     }
     
+    // Sort indicator for total goals column
+    const sortIcon = goalsTableSortState.direction === 'desc' ? '▼' : '▲';
+    const sortStyle = 'cursor: pointer; user-select: none;';
+    
     container.innerHTML = `
         <div class="goals-table-scroll">
             <table class="goals-table">
@@ -902,7 +965,9 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
                     <tr>
                         <th>Tên cầu thủ</th>
                         ${dateHeaders}
-                        <th>Tổng số bàn</th>
+                        <th id="goals-total-header" style="${sortStyle}" onclick="sortGoalsTable('total')">
+                            Tổng số bàn ${sortIcon}
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
@@ -911,6 +976,21 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
             </table>
         </div>
     `;
+}
+
+function sortGoalsTable(column) {
+    if (goalsTableSortState.column === column) {
+        // Toggle direction
+        goalsTableSortState.direction = goalsTableSortState.direction === 'desc' ? 'asc' : 'desc';
+    } else {
+        // New column, default to desc
+        goalsTableSortState.column = column;
+        goalsTableSortState.direction = 'desc';
+    }
+    
+    // Re-render the goals table
+    const allMatches = matches.filter(m => m.is_completed === true || m.is_completed === 1);
+    renderGoalStatistics(allMatches);
 }
 
 // Matches/Schedule functions
@@ -922,6 +1002,8 @@ async function loadMatches() {
         matches = await matchesAPI.getAll();
         renderUpcomingMatches();
         renderCompletedMatches();
+        // Re-render opponents to update head-to-head records
+        if (opponents.length > 0) renderOpponents();
     } catch (error) {
         alert('Error loading matches: ' + error.message);
     } finally {
@@ -1389,6 +1471,8 @@ async function deleteMatch(id) {
     try {
         await matchesAPI.delete(id);
         await loadMatches();
+        // Update opponents to refresh head-to-head records
+        if (opponents.length > 0) renderOpponents();
     } catch (error) {
         alert('Error deleting match: ' + error.message);
     } finally {
@@ -1628,6 +1712,8 @@ async function saveMatchResult(event) {
         await matchesAPI.updateResult(editingMatchResultId, resultData);
         closeMatchResultModal();
         await loadMatches();
+        // Update opponents to refresh head-to-head records
+        if (opponents.length > 0) renderOpponents();
     } catch (error) {
         alert('Error saving match result: ' + error.message);
     } finally {
@@ -1692,9 +1778,32 @@ function renderParticipationStatistics(completedMatches) {
         });
     });
     
+    // Convert to array and calculate participation rate for sorting
+    const participationArray = Object.values(participationData).map(playerData => {
+        const totalMatches = playerData.totalParticipated + playerData.totalNotParticipated;
+        const participationRate = totalMatches > 0 
+            ? parseFloat(((playerData.totalParticipated / totalMatches) * 100).toFixed(1))
+            : 0.0;
+        return {
+            ...playerData,
+            participationRate: participationRate
+        };
+    });
+    
+    // Sort by participation rate if needed
+    if (participationTableSortState.column === 'rate') {
+        participationArray.sort((a, b) => {
+            if (participationTableSortState.direction === 'desc') {
+                return b.participationRate - a.participationRate; // High to low
+            } else {
+                return a.participationRate - b.participationRate; // Low to high
+            }
+        });
+    }
+    
     // Build table rows
     let tableRows = '';
-    Object.values(participationData).forEach(playerData => {
+    participationArray.forEach(playerData => {
         let rowCells = `<td><strong>${escapeHtml(playerData.name)}</strong></td>`;
         
         // Add participation status for each match date
@@ -1704,9 +1813,16 @@ function renderParticipationStatistics(completedMatches) {
             rowCells += `<td class="${statusClass}">${status}</td>`;
         });
         
-        // Add totals with classes for sticky positioning
+        // Format participation rate
+        const participationRateText = playerData.participationRate.toFixed(1);
+        
+        // Color: red if < 50%, blue otherwise
+        const rateColor = playerData.participationRate < 50 ? '#dc3545' : '#667eea';
+        
+        // Add totals with classes for sticky positioning (order: Tổng tham gia, Tổng không tham gia, Tỉ lệ tham gia)
         rowCells += `<td class="participation-total-participated"><strong style="color: #28a745;">${playerData.totalParticipated}</strong></td>`;
         rowCells += `<td class="participation-total-not-participated"><strong style="color: #dc3545;">${playerData.totalNotParticipated}</strong></td>`;
+        rowCells += `<td class="participation-rate"><strong style="color: ${rateColor};">${participationRateText}%</strong></td>`;
         
         tableRows += `<tr>${rowCells}</tr>`;
     });
@@ -1722,6 +1838,10 @@ function renderParticipationStatistics(completedMatches) {
         }).join('');
     }
     
+    // Sort indicator for participation rate column
+    const sortIcon = participationTableSortState.direction === 'desc' ? '▼' : '▲';
+    const sortStyle = 'cursor: pointer; user-select: none;';
+    
     container.innerHTML = `
         <div class="participation-table-scroll">
             <table class="participation-table">
@@ -1731,6 +1851,9 @@ function renderParticipationStatistics(completedMatches) {
                         ${dateHeaders}
                         <th class="participation-total-participated-header" style="background: #28a745; color: white;">Tổng tham gia</th>
                         <th class="participation-total-not-participated-header" style="background: #dc3545; color: white;">Tổng không tham gia</th>
+                        <th id="participation-rate-header" class="participation-rate-header" style="background: #667eea; color: white; ${sortStyle}" onclick="sortParticipationTable('rate')">
+                            Tỉ lệ tham gia (%) ${sortIcon}
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1739,6 +1862,21 @@ function renderParticipationStatistics(completedMatches) {
             </table>
         </div>
     `;
+}
+
+function sortParticipationTable(column) {
+    if (participationTableSortState.column === column) {
+        // Toggle direction
+        participationTableSortState.direction = participationTableSortState.direction === 'desc' ? 'asc' : 'desc';
+    } else {
+        // New column, default to desc
+        participationTableSortState.column = column;
+        participationTableSortState.direction = 'desc';
+    }
+    
+    // Re-render the participation table
+    const allMatches = matches.filter(m => m.is_completed === true || m.is_completed === 1);
+    renderParticipationStatistics(allMatches);
 }
 
 

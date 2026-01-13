@@ -945,7 +945,7 @@ header h1 {
 
 .participation-table th.participation-total-participated-header {
     position: sticky;
-    right: 120px;
+    right: 240px;
     background: #28a745 !important;
     z-index: 10;
     min-width: 120px;
@@ -953,8 +953,16 @@ header h1 {
 
 .participation-table th.participation-total-not-participated-header {
     position: sticky;
-    right: 0;
+    right: 120px;
     background: #dc3545 !important;
+    z-index: 10;
+    min-width: 120px;
+}
+
+.participation-table th.participation-rate-header {
+    position: sticky;
+    right: 0;
+    background: #667eea !important;
     z-index: 10;
     min-width: 120px;
 }
@@ -993,11 +1001,37 @@ header h1 {
 
 .participation-table td.participation-total-participated {
     position: sticky;
+    right: 240px;
+    background: white;
+    z-index: 5;
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.participation-table td.participation-total-not-participated {
+    position: sticky;
     right: 120px;
     background: white;
     z-index: 5;
     font-weight: 600;
     min-width: 120px;
+}
+
+.participation-table td.participation-rate {
+    position: sticky;
+    right: 0;
+    background: white;
+    z-index: 5;
+    font-weight: 600;
+    min-width: 120px;
+}
+
+.participation-table tbody tr:nth-child(even) td.participation-rate {
+    background: #f8f9fa;
+}
+
+.participation-table tbody tr:hover td.participation-rate {
+    background: #e9ecef;
 }
 
 .participation-table tbody tr:nth-child(even) td.participation-total-participated {
