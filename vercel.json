@@ -9,6 +9,10 @@
       "destination": "/static/$1"
     },
     {
+      "source": "/",
+      "destination": "/frontend/index.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/frontend/$1"
     }
