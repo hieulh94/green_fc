@@ -11,7 +11,8 @@ from app.routers import teams, players, uploads, opponents, matches
 app = FastAPI(
     title="GREEN FC",
     description="Lightweight football team management backend",
-    version="1.0.0"
+    version="1.0.0",
+    root_path="/api"  # Mount app at /api for Vercel routing
 )
 
 # CORS middleware
