@@ -45,10 +45,11 @@ class PlayerService:
         return result
 
     def create_player(self, player: PlayerCreate) -> PlayerResponse:
-        # Validate team exists
-        team = self.team_repository.get_by_id(player.team_id)
-        if not team:
-            raise ValueError(f"Team with id {player.team_id} does not exist")
+        # Validate team exists only if team_id is provided
+        if player.team_id is not None:
+            team = self.team_repository.get_by_id(player.team_id)
+            if not team:
+                raise ValueError(f"Team with id {player.team_id} does not exist")
         
         # Set total_goals to 0 for new player (will be calculated from match_goals)
         player_data = player.model_dump()

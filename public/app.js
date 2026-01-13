@@ -390,13 +390,8 @@ async function savePlayer(event) {
         return;
     }
     
-    // Get first team ID (assuming only one team)
+    // Get first team ID if available (optional)
     const teamId = teams.length > 0 ? teams[0].id : null;
-    if (!teamId) {
-        alert('No team found. Please create a team first.');
-        hideLoading();
-        return;
-    }
     
     const formData = {
         name: document.getElementById('player-name').value,
@@ -406,8 +401,12 @@ async function savePlayer(event) {
             : null,
         profile_image: document.getElementById('player-profile-image').value || null,
         role: document.getElementById('player-role').value || 'Cầu thủ',
-        team_id: teamId, // Automatically assign team_id
     };
+    
+    // Only include team_id if a team exists
+    if (teamId) {
+        formData.team_id = teamId;
+    }
     
     try {
         if (editingPlayerId) {

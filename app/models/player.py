@@ -15,7 +15,7 @@ class Player(Base):
     profile_image = Column(String, nullable=True)  # URL to profile image
     role = Column(String, nullable=False, default="Cầu thủ")  # Đội trưởng, Đội phó, Cầu thủ
     total_goals = Column(Integer, nullable=False, default=0)  # Tổng số bàn thắng
-    team_id = Column(Integer, ForeignKey("teams.id"), nullable=False)
+    team_id = Column(Integer, ForeignKey("teams.id"), nullable=True)
 
     team = relationship("Team", back_populates="players")
 

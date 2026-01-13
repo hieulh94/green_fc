@@ -9,7 +9,7 @@ class PlayerBase(BaseModel):
     profile_image: str | None = None
     role: str = "Cầu thủ"  # Đội trưởng, Đội phó, Cầu thủ
     total_goals: int = 0  # Tổng số bàn thắng (sẽ được tính từ match_goals)
-    team_id: int
+    team_id: int | None = None
 
 
 class PlayerCreate(PlayerBase):
