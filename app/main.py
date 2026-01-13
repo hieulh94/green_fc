@@ -41,7 +41,7 @@ app.include_router(opponents.router)
 app.include_router(matches.router)
 
 
-@app.get("/")
+@app.get("/api")
 def root():
     return {"message": "Football Team Management API"}
 

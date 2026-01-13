@@ -5,8 +5,32 @@
       "destination": "/api/index.py"
     },
     {
+      "source": "/api",
+      "destination": "/api/index.py"
+    },
+    {
       "source": "/static/(.*)",
       "destination": "/static/$1"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/styles.css",
+      "destination": "/frontend/styles.css"
+    },
+    {
+      "source": "/app.js",
+      "destination": "/frontend/app.js"
+    },
+    {
+      "source": "/api.js",
+      "destination": "/frontend/api.js"
+    },
+    {
+      "source": "/positions.js",
+      "destination": "/frontend/positions.js"
     },
     {
       "source": "/",
@@ -14,7 +38,7 @@
     },
     {
       "source": "/(.*)",
-      "destination": "/frontend/$1"
+      "destination": "/frontend/index.html"
     }
   ],
   "headers": [
