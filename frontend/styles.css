@@ -787,6 +787,118 @@ header h1 {
     .modal-content {
         max-height: 95vh;
         padding: 20px;
+        width: 95%;
+        max-width: 95%;
+        border-radius: 8px;
+    }
+    
+    .modal-content h2 {
+        font-size: 1.3em;
+        margin-bottom: 15px;
+        padding-right: 30px;
+    }
+    
+    .close {
+        right: 10px;
+        top: 10px;
+        font-size: 32px;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 50%;
+        z-index: 10;
+    }
+    
+    .form-group {
+        margin-bottom: 15px;
+    }
+    
+    .form-group label {
+        font-size: 0.95em;
+        margin-bottom: 6px;
+    }
+    
+    /* Radio group responsive */
+    .radio-group {
+        flex-direction: column !important;
+        gap: 12px !important;
+        margin-top: 8px !important;
+    }
+    
+    .radio-group label {
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        padding: 8px 12px;
+        border: 2px solid #e9ecef;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .radio-group label:hover {
+        background: #f8f9fa;
+        border-color: #667eea;
+    }
+    
+    .radio-group input[type="radio"] {
+        width: auto !important;
+        margin: 0;
+        flex-shrink: 0;
+    }
+    
+    .radio-group span {
+        font-size: 0.95em;
+    }
+    
+    /* Score input responsive */
+    .score-input-group {
+        flex-direction: column !important;
+        gap: 10px !important;
+        align-items: stretch !important;
+    }
+    
+    .score-input-group > div {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+    }
+    
+    .score-input-group > span {
+        align-self: center;
+        font-size: 1.2em;
+        margin: 5px 0;
+    }
+    
+    .form-group input[type="number"] {
+        padding: 10px;
+        font-size: 1em;
+    }
+    
+    /* Form actions responsive */
+    .form-actions {
+        flex-direction: column;
+        gap: 10px;
+        margin-top: 20px;
+    }
+    
+    .form-actions .btn {
+        width: 100%;
+        padding: 12px;
+        font-size: 1em;
+    }
+    
+    /* Positions container responsive */
+    .positions-container {
+        grid-template-columns: 1fr !important;
+        max-height: 150px;
+        padding: 8px;
+    }
+    
+    .position-checkbox {
+        padding: 8px;
     }
 }
 

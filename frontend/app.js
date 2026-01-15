@@ -997,6 +997,7 @@ function sortGoalsTable(column) {
 
 // Matches/Schedule functions
 let currentScheduleSubTab = 'upcoming';
+let selectedMonthFilter = ''; // Format: 'YYYY-MM' or '' for all months
 
 async function loadMatches() {
     showLoading();
@@ -1064,7 +1065,7 @@ function renderMatchesList(matchesList, showResult = false) {
         return '<div class="empty-state"><h3>Chưa có trận đấu</h3></div>';
     }
     
-    // Sort matches by date (oldest first for timeline)
+    // Sort matches by date descending (newest first) for both completed and upcoming matches
     const sortedMatches = [...validMatches].sort((a, b) => {
         try {
             // Parse dates (YYYY-MM-DD format) - compare dates only
@@ -1073,7 +1074,8 @@ function renderMatchesList(matchesList, showResult = false) {
             if (dateAParts.length !== 3 || dateBParts.length !== 3) return 0;
             const dateA = new Date(parseInt(dateAParts[0]), parseInt(dateAParts[1]) - 1, parseInt(dateAParts[2])).getTime();
             const dateB = new Date(parseInt(dateBParts[0]), parseInt(dateBParts[1]) - 1, parseInt(dateBParts[2])).getTime();
-            return dateA - dateB;
+            // Sort descending (newest first) for both completed and upcoming matches
+            return dateB - dateA;
         } catch (e) {
             return 0;
         }
@@ -1243,7 +1245,8 @@ function renderCompletedMatches() {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Today at 00:00:00
     
-    const completedMatches = matches.filter(match => {
+    // Get all completed matches (before filtering by month)
+    const allCompletedMatches = matches.filter(match => {
         // Check if match is marked as completed (handle undefined/null as false)
         const isCompleted = match.is_completed === true || match.is_completed === 1;
         if (isCompleted) return true;
@@ -1268,7 +1271,85 @@ function renderCompletedMatches() {
         }
     });
     
-    container.innerHTML = renderMatchesList(completedMatches, true);
+    // Populate month filter dropdown with all completed matches
+    populateMonthFilter(allCompletedMatches);
+    
+    // Filter by month if selected
+    let completedMatches = allCompletedMatches;
+    if (selectedMonthFilter) {
+        completedMatches = completedMatches.filter(match => {
+            if (!match.date) return false;
+            const matchMonth = match.date.substring(0, 7); // Get YYYY-MM
+            return matchMonth === selectedMonthFilter;
+        });
+    }
+    
+    // Sort by date descending (newest first)
+    completedMatches.sort((a, b) => {
+        try {
+            const dateAParts = a.date.split('-');
+            const dateBParts = b.date.split('-');
+            if (dateAParts.length !== 3 || dateBParts.length !== 3) return 0;
+            const dateA = new Date(parseInt(dateAParts[0]), parseInt(dateAParts[1]) - 1, parseInt(dateAParts[2])).getTime();
+            const dateB = new Date(parseInt(dateBParts[0]), parseInt(dateBParts[1]) - 1, parseInt(dateBParts[2])).getTime();
+            return dateB - dateA; // Descending order (newest first)
+        } catch (e) {
+            return 0;
+        }
+    });
+    
+    // Get filter HTML (first child is the filter div)
+    const filterHTML = container.firstElementChild ? container.firstElementChild.outerHTML : '';
+    
+    // Render matches
+    const matchesHTML = renderMatchesList(completedMatches, true);
+    
+    container.innerHTML = filterHTML + matchesHTML;
+}
+
+function populateMonthFilter(completedMatches) {
+    const monthFilter = document.getElementById('month-filter');
+    if (!monthFilter) return;
+    
+    // Get all unique months from completed matches
+    const monthSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const month = match.date.substring(0, 7); // YYYY-MM
+            monthSet.add(month);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const months = Array.from(monthSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các tháng"
+    monthFilter.innerHTML = '<option value="">Tất cả các tháng</option>';
+    
+    // Add month options
+    months.forEach(month => {
+        const [year, monthNum] = month.split('-');
+        const monthNames = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 
+                          'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+        const monthName = monthNames[parseInt(monthNum) - 1];
+        const option = document.createElement('option');
+        option.value = month;
+        option.textContent = `${monthName}/${year}`;
+        monthFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    monthFilter.value = selectedMonthFilter;
+}
+
+function filterCompletedMatchesByMonth() {
+    const monthFilter = document.getElementById('month-filter');
+    if (!monthFilter) return;
+    
+    selectedMonthFilter = monthFilter.value;
+    renderCompletedMatches();
 }
 
 function renderMatches() {
