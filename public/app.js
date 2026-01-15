@@ -845,7 +845,6 @@ function renderTopGoalscorers(playerGoalsMap) {
     }
     
     container.innerHTML = topPlayers.map((player, index) => {
-        const rank = index + 1;
         const medalClasses = ['medal-gold', 'medal-silver', 'medal-bronze'];
         const podiumHeights = ['podium-first', 'podium-second', 'podium-third'];
         const medalIcons = ['🥇', '🥈', '🥉'];
@@ -853,14 +852,13 @@ function renderTopGoalscorers(playerGoalsMap) {
             <div class="goalscorer-card ${podiumHeights[index]}">
                 <div class="goalscorer-circle ${medalClasses[index]}">
                     <div class="medal-icon">${medalIcons[index]}</div>
-                <div class="goalscorer-rank">${rank}</div>
-                <div class="goalscorer-name">${escapeHtml(player.name)}</div>
                     <div class="goalscorer-goals">
                         <span class="goals-number">${player.totalGoals}</span>
                         <span class="goals-label">bàn</span>
                     </div>
                 </div>
                 <div class="podium-base"></div>
+                <div class="goalscorer-name">${escapeHtml(player.name)}</div>
             </div>
         `;
     }).join('');
