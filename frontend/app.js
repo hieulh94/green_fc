@@ -922,7 +922,7 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
         
         // If no match dates, just show total
         if (allMatchDates.length === 0) {
-            rowCells += `<td><strong>${totalGoals}</strong></td>`;
+            rowCells += `<td class="goals-total"><strong>${totalGoals}</strong></td>`;
         } else {
             // Show goals for each match date
             allMatchDates.forEach(date => {
@@ -939,7 +939,7 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
             });
             
             // Add total column
-            rowCells += `<td><strong>${totalGoals}</strong></td>`;
+            rowCells += `<td class="goals-total"><strong>${totalGoals}</strong></td>`;
         }
         
         tableRows += `<tr>${rowCells}</tr>`;
@@ -967,7 +967,7 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
                     <tr>
                         <th>Tên cầu thủ</th>
                         ${dateHeaders}
-                        <th id="goals-total-header" style="${sortStyle}" onclick="sortGoalsTable('total')">
+                        <th id="goals-total-header" class="goals-total-header" style="${sortStyle}" onclick="sortGoalsTable('total')">
                             Tổng số bàn ${sortIcon}
                         </th>
                     </tr>
@@ -1001,9 +1001,17 @@ let currentScheduleSubTab = 'upcoming';
 async function loadMatches() {
     showLoading();
     try {
+        // Ensure players are loaded before rendering matches
+        // because matches need player names for goals display
+        if (players.length === 0) {
+            await loadPlayers();
+        }
+        
         matches = await matchesAPI.getAll();
         renderUpcomingMatches();
         renderCompletedMatches();
+        // Re-render opponents to update head-to-head records
+        if (opponents.length > 0) renderOpponents();
     } catch (error) {
         alert('Error loading matches: ' + error.message);
     } finally {
@@ -1034,8 +1042,15 @@ function switchScheduleSubTab(tab) {
 }
 
 function getPlayerName(playerId) {
+    if (!playerId) return 'Unknown';
     const player = players.find(p => p.id === playerId);
-    return player ? player.name : `Player ID: ${playerId}`;
+    if (player) {
+        return player.name;
+    }
+    // If player not found, try to load players again (in case they weren't loaded yet)
+    // But don't show "Player ID: X" - just show a placeholder
+    console.warn(`Player with ID ${playerId} not found in players list`);
+    return 'Cầu thủ đã xóa';
 }
 
 function renderMatchesList(matchesList, showResult = false) {
@@ -1143,30 +1158,30 @@ function renderMatchesList(matchesList, showResult = false) {
                         // Build goals list if completed
                         let goalsList = '';
                         if (showResult && match.goals && match.goals.length > 0) {
-                            goalsList = '<div class="match-goals-list" style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #e9ecef; width: 100%;">';
+                            goalsList = '<div class="match-goals-list" style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #e9ecef; width: 100%; min-width: 0; box-sizing: border-box;">';
                             match.goals.forEach(goal => {
                                 const playerName = getPlayerName(goal.player_id);
-                                goalsList += `<div style="margin: 5px 0; color: #333; font-weight: 500;">- <span style="color: #667eea; font-weight: 600;">${escapeHtml(playerName)}</span> : <span style="color: #28a745; font-weight: 700; font-size: 1.1em;">${goal.goals}</span> bàn</div>`;
+                                goalsList += `<div style="margin: 5px 0; color: #333; font-weight: 500; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;">- <span style="color: #667eea; font-weight: 600; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(playerName)}</span> : <span style="color: #28a745; font-weight: 700; font-size: 1.1em;">${goal.goals}</span> bàn</div>`;
                             });
                             goalsList += '</div>';
                         }
                         
                         return `
                             <div class="timeline-match">
-                                <div class="match-time" style="text-align: center; color: ${matchTimeColor};">${dateDisplay}</div>
+                                <div class="match-time" style="text-align: center; color: ${matchTimeColor}; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;">${dateDisplay}</div>
                                 <div class="match-card">
-                                    <div style="display: flex; flex-direction: column; width: 100%;">
-                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: nowrap;">
-                                            <div class="match-team-left">
-                                                <span class="team-name">FC GREEN</span>
+                                    <div style="display: flex; flex-direction: column; width: 100%; min-width: 0; box-sizing: border-box;">
+                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: wrap; width: 100%;" class="match-main-content">
+                                            <div class="match-team-left" style="min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; justify-content: flex-start;">
+                                                <span class="team-name" style="display: block; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; flex: 1; text-align: left;">FC GREEN</span>
+                                                ${leftScore ? `<div class="match-score-left" style="flex-shrink: 0;">${leftScore}</div>` : ''}
                                             </div>
-                                            ${leftScore ? `<div class="match-score-left">${leftScore}</div>` : ''}
-                                            <div class="match-vs" style="${resultBadgeStyle}">${resultBadgeText}</div>
-                                            ${rightScore ? `<div class="match-score-right">${rightScore}</div>` : ''}
-                                            <div class="match-team-right">
-                                                <span class="team-name">${escapeHtml(opponentName)}</span>
+                                            <div class="match-vs" style="${resultBadgeStyle} flex-shrink: 0;">${resultBadgeText}</div>
+                                            <div class="match-team-right" style="min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; justify-content: flex-end;">
+                                                ${rightScore ? `<div class="match-score-right" style="flex-shrink: 0;">${rightScore}</div>` : ''}
+                                                <span class="team-name" style="display: block; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; flex: 1; text-align: right;">${escapeHtml(opponentName)}</span>
                                             </div>
-                                            <div class="match-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
+                                            <div class="match-actions" ${!isLoggedIn ? 'style="display: none; flex-basis: 100%;"' : 'style="flex-basis: 100%;"'}">
                                                 ${showResult 
                                                     ? `<button class="btn btn-primary btn-small" onclick="editMatchResult(${match.id})">Sửa kết quả</button>`
                                                     : `<button class="btn btn-primary btn-small" onclick="editMatch(${match.id})">Sửa</button>`
@@ -1851,10 +1866,10 @@ function renderParticipationStatistics(completedMatches) {
                     <tr>
                         <th class="participation-player-name">Tên cầu thủ</th>
                         ${dateHeaders}
-                        <th class="participation-total-participated-header" style="background: #28a745; color: white;">Tổng tham gia</th>
-                        <th class="participation-total-not-participated-header" style="background: #dc3545; color: white;">Tổng không tham gia</th>
+                        <th class="participation-total-participated-header" style="background: #28a745; color: white;">V</th>
+                        <th class="participation-total-not-participated-header" style="background: #dc3545; color: white;">X</th>
                         <th id="participation-rate-header" class="participation-rate-header" style="background: #667eea; color: white; ${sortStyle}" onclick="sortParticipationTable('rate')">
-                            Tỉ lệ tham gia (%) ${sortIcon}
+                            % ${sortIcon}
                         </th>
                     </tr>
                 </thead>
