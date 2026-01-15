@@ -678,6 +678,33 @@ async function loadStatistics() {
 }
 
 function renderGoalStatistics(completedMatches) {
+    // Filter by month or quarter if selected
+    let filteredMatches = completedMatches;
+    if (selectedGoalsMonthFilter) {
+        filteredMatches = completedMatches.filter(match => {
+            if (!match.date) return false;
+            const matchMonth = match.date.substring(0, 7); // Get YYYY-MM
+            return matchMonth === selectedGoalsMonthFilter;
+        });
+    } else if (selectedGoalsQuarterFilter) {
+        filteredMatches = completedMatches.filter(match => {
+            if (!match.date) return false;
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const matchQuarter = `${year}-${quarter}`;
+            return matchQuarter === selectedGoalsQuarterFilter;
+        });
+    }
+    
+    // Populate month and quarter filter dropdowns
+    populateGoalsMonthFilter(completedMatches);
+    populateGoalsQuarterFilter(completedMatches);
+    
     // Calculate player goals data
     const playerGoalsMap = {}; // { playerId: { name, totalGoals, matches: [{date, goals}] } }
     
@@ -690,8 +717,8 @@ function renderGoalStatistics(completedMatches) {
         };
     });
     
-    // Process all completed matches
-    completedMatches.forEach(match => {
+    // Process all completed matches (use filtered matches)
+    filteredMatches.forEach(match => {
         if (match.goals && match.goals.length > 0) {
             match.goals.forEach(goal => {
                 const playerId = goal.player_id;
@@ -715,8 +742,8 @@ function renderGoalStatistics(completedMatches) {
         }
     });
     
-    // Get all unique match dates (sorted)
-    const allMatchDates = [...new Set(completedMatches.map(m => m.date))].sort();
+    // Get all unique match dates (sorted) - use filtered matches for table columns
+    const allMatchDates = [...new Set(filteredMatches.map(m => m.date))].sort();
     
     // Get all players (including those who didn't score)
     const allPlayers = players.map(p => ({
@@ -724,8 +751,72 @@ function renderGoalStatistics(completedMatches) {
         name: p.name
     }));
     
+    // Filter Top 3 by month or quarter if selected
+    let top3PlayerGoalsMap = playerGoalsMap;
+    if (selectedTop3MonthFilter || selectedTop3QuarterFilter) {
+        // Recalculate playerGoalsMap for Top 3 only
+        top3PlayerGoalsMap = {};
+        players.forEach(player => {
+            top3PlayerGoalsMap[player.id] = {
+                name: player.name,
+                totalGoals: 0,
+                matches: []
+            };
+        });
+        
+        let top3FilteredMatches = completedMatches;
+        if (selectedTop3MonthFilter) {
+            top3FilteredMatches = completedMatches.filter(match => {
+                if (!match.date) return false;
+                const matchMonth = match.date.substring(0, 7);
+                return matchMonth === selectedTop3MonthFilter;
+            });
+        } else if (selectedTop3QuarterFilter) {
+            top3FilteredMatches = completedMatches.filter(match => {
+                if (!match.date) return false;
+                const [year, month] = match.date.substring(0, 7).split('-');
+                const monthNum = parseInt(month);
+                let quarter;
+                if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+                else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+                else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+                else quarter = 'Q4';
+                const matchQuarter = `${year}-${quarter}`;
+                return matchQuarter === selectedTop3QuarterFilter;
+            });
+        }
+        
+        top3FilteredMatches.forEach(match => {
+            if (match.goals && match.goals.length > 0) {
+                match.goals.forEach(goal => {
+                    const playerId = goal.player_id;
+                    const playerName = getPlayerName(playerId);
+                    const goalsInMatch = goal.goals || 0;
+                    
+                    if (!top3PlayerGoalsMap[playerId]) {
+                        top3PlayerGoalsMap[playerId] = {
+                            name: playerName,
+                            totalGoals: 0,
+                            matches: []
+                        };
+                    }
+                    
+                    top3PlayerGoalsMap[playerId].totalGoals += goalsInMatch;
+                    top3PlayerGoalsMap[playerId].matches.push({
+                        date: match.date,
+                        goals: goalsInMatch
+                    });
+                });
+            }
+        });
+    }
+    
+    // Populate Top 3 month and quarter filter dropdowns
+    populateTop3MonthFilter(completedMatches);
+    populateTop3QuarterFilter(completedMatches);
+    
     // Render top 3 goalscorers
-    renderTopGoalscorers(playerGoalsMap);
+    renderTopGoalscorers(top3PlayerGoalsMap);
     
     // Render bubble chart
     renderBubbleChart(playerGoalsMap);
@@ -755,12 +846,21 @@ function renderTopGoalscorers(playerGoalsMap) {
     
     container.innerHTML = topPlayers.map((player, index) => {
         const rank = index + 1;
-        const medalColors = ['#ffd700', '#c0c0c0', '#cd7f32']; // Gold, Silver, Bronze
+        const medalClasses = ['medal-gold', 'medal-silver', 'medal-bronze'];
+        const podiumHeights = ['podium-first', 'podium-second', 'podium-third'];
+        const medalIcons = ['🥇', '🥈', '🥉'];
         return `
-            <div class="goalscorer-circle" style="background: ${medalColors[index]};">
+            <div class="goalscorer-card ${podiumHeights[index]}">
+                <div class="goalscorer-circle ${medalClasses[index]}">
+                    <div class="medal-icon">${medalIcons[index]}</div>
                 <div class="goalscorer-rank">${rank}</div>
                 <div class="goalscorer-name">${escapeHtml(player.name)}</div>
-                <div class="goalscorer-goals">${player.totalGoals} bàn</div>
+                    <div class="goalscorer-goals">
+                        <span class="goals-number">${player.totalGoals}</span>
+                        <span class="goals-label">bàn</span>
+                    </div>
+                </div>
+                <div class="podium-base"></div>
             </div>
         `;
     }).join('');
@@ -996,6 +1096,13 @@ function sortGoalsTable(column) {
 // Matches/Schedule functions
 let currentScheduleSubTab = 'upcoming';
 let selectedMonthFilter = ''; // Format: 'YYYY-MM' or '' for all months
+let selectedGoalsMonthFilter = ''; // Format: 'YYYY-MM' or '' for all months (for goals statistics)
+let selectedGoalsQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for goals statistics), e.g., '2026-Q1'
+let selectedTop3MonthFilter = ''; // Format: 'YYYY-MM' or '' for all months (for top 3 goalscorers)
+let selectedTop3QuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for top 3 goalscorers), e.g., '2026-Q1'
+let selectedParticipationMonthFilter = ''; // Format: 'YYYY-MM' or '' for all months (for participation statistics)
+let selectedParticipationQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for participation statistics), e.g., '2026-Q1'
+let selectedCompletedQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for completed matches), e.g., '2026-Q1'
 
 async function loadMatches() {
     showLoading();
@@ -1243,7 +1350,7 @@ function renderCompletedMatches() {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Today at 00:00:00
     
-    // Get all completed matches (before filtering by month)
+    // Get all completed matches (before filtering by month/quarter)
     const allCompletedMatches = matches.filter(match => {
         // Check if match is marked as completed (handle undefined/null as false)
         const isCompleted = match.is_completed === true || match.is_completed === 1;
@@ -1269,16 +1376,26 @@ function renderCompletedMatches() {
         }
     });
     
-    // Populate month filter dropdown with all completed matches
-    populateMonthFilter(allCompletedMatches);
-    
-    // Filter by month if selected
+    // Filter by month or quarter if selected
     let completedMatches = allCompletedMatches;
     if (selectedMonthFilter) {
         completedMatches = completedMatches.filter(match => {
             if (!match.date) return false;
             const matchMonth = match.date.substring(0, 7); // Get YYYY-MM
             return matchMonth === selectedMonthFilter;
+        });
+    } else if (selectedCompletedQuarterFilter) {
+        completedMatches = completedMatches.filter(match => {
+            if (!match.date) return false;
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const matchQuarter = `${year}-${quarter}`;
+            return matchQuarter === selectedCompletedQuarterFilter;
         });
     }
     
@@ -1296,13 +1413,24 @@ function renderCompletedMatches() {
         }
     });
     
-    // Get filter HTML (first child is the filter div)
+    // Populate month and quarter filter dropdowns with all completed matches
+    // This must be done BEFORE getting filterHTML to ensure selected values are set
+    populateMonthFilter(allCompletedMatches);
+    populateCompletedQuarterFilter(allCompletedMatches);
+    
+    // Get filter HTML (first child is the filter div) - after populate to get correct selected values
     const filterHTML = container.firstElementChild ? container.firstElementChild.outerHTML : '';
     
     // Render matches
     const matchesHTML = renderMatchesList(completedMatches, true);
     
     container.innerHTML = filterHTML + matchesHTML;
+    
+    // Re-set selected values after innerHTML is set (because innerHTML resets form values)
+    const monthFilterAfter = document.getElementById('month-filter');
+    const quarterFilterAfter = document.getElementById('completed-quarter-filter');
+    if (monthFilterAfter) monthFilterAfter.value = selectedMonthFilter;
+    if (quarterFilterAfter) quarterFilterAfter.value = selectedCompletedQuarterFilter;
 }
 
 function populateMonthFilter(completedMatches) {
@@ -1344,10 +1472,419 @@ function populateMonthFilter(completedMatches) {
 
 function filterCompletedMatchesByMonth() {
     const monthFilter = document.getElementById('month-filter');
-    if (!monthFilter) return;
+    const quarterFilter = document.getElementById('completed-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
     
     selectedMonthFilter = monthFilter.value;
+    
+    // If month is selected, reset quarter to "all"
+    if (selectedMonthFilter) {
+        selectedCompletedQuarterFilter = '';
+        quarterFilter.value = '';
+    }
+    
     renderCompletedMatches();
+}
+
+function populateCompletedQuarterFilter(completedMatches) {
+    const quarterFilter = document.getElementById('completed-quarter-filter');
+    if (!quarterFilter) return;
+    
+    // Get all unique quarters from completed matches
+    const quarterSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const quarterKey = `${year}-${quarter}`;
+            quarterSet.add(quarterKey);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const quarters = Array.from(quarterSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các quý"
+    quarterFilter.innerHTML = '<option value="">Tất cả các quý</option>';
+    
+    // Add quarter options
+    quarters.forEach(quarterKey => {
+        const [year, quarter] = quarterKey.split('-');
+        const quarterNames = { 'Q1': 'Quý 1', 'Q2': 'Quý 2', 'Q3': 'Quý 3', 'Q4': 'Quý 4' };
+        const quarterName = quarterNames[quarter];
+        const option = document.createElement('option');
+        option.value = quarterKey;
+        option.textContent = `${quarterName}/${year}`;
+        quarterFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    quarterFilter.value = selectedCompletedQuarterFilter;
+}
+
+function filterCompletedMatchesByQuarter() {
+    const monthFilter = document.getElementById('month-filter');
+    const quarterFilter = document.getElementById('completed-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedCompletedQuarterFilter = quarterFilter.value;
+    
+    // If quarter is selected, reset month to "all"
+    if (selectedCompletedQuarterFilter) {
+        selectedMonthFilter = '';
+        monthFilter.value = '';
+    }
+    
+    renderCompletedMatches();
+}
+
+function populateGoalsMonthFilter(completedMatches) {
+    const monthFilter = document.getElementById('goals-month-filter');
+    if (!monthFilter) return;
+    
+    // Get all unique months from completed matches
+    const monthSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const month = match.date.substring(0, 7); // YYYY-MM
+            monthSet.add(month);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const months = Array.from(monthSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các tháng"
+    monthFilter.innerHTML = '<option value="">Tất cả các tháng</option>';
+    
+    // Add month options
+    months.forEach(month => {
+        const [year, monthNum] = month.split('-');
+        const monthNames = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 
+                          'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+        const monthName = monthNames[parseInt(monthNum) - 1];
+        const option = document.createElement('option');
+        option.value = month;
+        option.textContent = `${monthName}/${year}`;
+        monthFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    monthFilter.value = selectedGoalsMonthFilter;
+}
+
+function filterGoalsByMonth() {
+    const monthFilter = document.getElementById('goals-month-filter');
+    const quarterFilter = document.getElementById('goals-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedGoalsMonthFilter = monthFilter.value;
+    
+    // If month is selected, reset quarter to "all"
+    if (selectedGoalsMonthFilter) {
+        selectedGoalsQuarterFilter = '';
+        quarterFilter.value = '';
+    }
+    
+    // Reload statistics to apply filter
+    loadStatistics();
+}
+
+function populateGoalsQuarterFilter(completedMatches) {
+    const quarterFilter = document.getElementById('goals-quarter-filter');
+    if (!quarterFilter) return;
+    
+    // Get all unique quarters from completed matches
+    const quarterSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const quarterKey = `${year}-${quarter}`;
+            quarterSet.add(quarterKey);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const quarters = Array.from(quarterSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các quý"
+    quarterFilter.innerHTML = '<option value="">Tất cả các quý</option>';
+    
+    // Add quarter options
+    quarters.forEach(quarterKey => {
+        const [year, quarter] = quarterKey.split('-');
+        const quarterNames = { 'Q1': 'Quý 1', 'Q2': 'Quý 2', 'Q3': 'Quý 3', 'Q4': 'Quý 4' };
+        const quarterName = quarterNames[quarter];
+        const option = document.createElement('option');
+        option.value = quarterKey;
+        option.textContent = `${quarterName}/${year}`;
+        quarterFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    quarterFilter.value = selectedGoalsQuarterFilter;
+}
+
+function filterGoalsByQuarter() {
+    const monthFilter = document.getElementById('goals-month-filter');
+    const quarterFilter = document.getElementById('goals-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedGoalsQuarterFilter = quarterFilter.value;
+    
+    // If quarter is selected, reset month to "all"
+    if (selectedGoalsQuarterFilter) {
+        selectedGoalsMonthFilter = '';
+        monthFilter.value = '';
+    }
+    
+    // Reload statistics to apply filter
+    loadStatistics();
+}
+
+function populateParticipationMonthFilter(completedMatches) {
+    const monthFilter = document.getElementById('participation-month-filter');
+    if (!monthFilter) return;
+    
+    // Get all unique months from completed matches
+    const monthSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const month = match.date.substring(0, 7); // YYYY-MM
+            monthSet.add(month);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const months = Array.from(monthSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các tháng"
+    monthFilter.innerHTML = '<option value="">Tất cả các tháng</option>';
+    
+    // Add month options
+    months.forEach(month => {
+        const [year, monthNum] = month.split('-');
+        const monthNames = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 
+                          'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+        const monthName = monthNames[parseInt(monthNum) - 1];
+        const option = document.createElement('option');
+        option.value = month;
+        option.textContent = `${monthName}/${year}`;
+        monthFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    monthFilter.value = selectedParticipationMonthFilter;
+}
+
+function filterParticipationByMonth() {
+    const monthFilter = document.getElementById('participation-month-filter');
+    const quarterFilter = document.getElementById('participation-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedParticipationMonthFilter = monthFilter.value;
+    
+    // If month is selected, reset quarter to "all"
+    if (selectedParticipationMonthFilter) {
+        selectedParticipationQuarterFilter = '';
+        quarterFilter.value = '';
+    }
+    
+    // Reload statistics to apply filter
+    loadStatistics();
+}
+
+function populateParticipationQuarterFilter(completedMatches) {
+    const quarterFilter = document.getElementById('participation-quarter-filter');
+    if (!quarterFilter) return;
+    
+    // Get all unique quarters from completed matches
+    const quarterSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const quarterKey = `${year}-${quarter}`;
+            quarterSet.add(quarterKey);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const quarters = Array.from(quarterSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các quý"
+    quarterFilter.innerHTML = '<option value="">Tất cả các quý</option>';
+    
+    // Add quarter options
+    quarters.forEach(quarterKey => {
+        const [year, quarter] = quarterKey.split('-');
+        const quarterNames = { 'Q1': 'Quý 1', 'Q2': 'Quý 2', 'Q3': 'Quý 3', 'Q4': 'Quý 4' };
+        const quarterName = quarterNames[quarter];
+        const option = document.createElement('option');
+        option.value = quarterKey;
+        option.textContent = `${quarterName}/${year}`;
+        quarterFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    quarterFilter.value = selectedParticipationQuarterFilter;
+}
+
+function filterParticipationByQuarter() {
+    const monthFilter = document.getElementById('participation-month-filter');
+    const quarterFilter = document.getElementById('participation-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedParticipationQuarterFilter = quarterFilter.value;
+    
+    // If quarter is selected, reset month to "all"
+    if (selectedParticipationQuarterFilter) {
+        selectedParticipationMonthFilter = '';
+        monthFilter.value = '';
+    }
+    
+    // Reload statistics to apply filter
+    loadStatistics();
+}
+
+function populateTop3MonthFilter(completedMatches) {
+    const monthFilter = document.getElementById('top3-month-filter');
+    if (!monthFilter) return;
+    
+    // Get all unique months from completed matches
+    const monthSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const month = match.date.substring(0, 7); // YYYY-MM
+            monthSet.add(month);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const months = Array.from(monthSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các tháng"
+    monthFilter.innerHTML = '<option value="">Tất cả các tháng</option>';
+    
+    // Add month options
+    months.forEach(month => {
+        const [year, monthNum] = month.split('-');
+        const monthNames = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 
+                          'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+        const monthName = monthNames[parseInt(monthNum) - 1];
+        const option = document.createElement('option');
+        option.value = month;
+        option.textContent = `${monthName}/${year}`;
+        monthFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    monthFilter.value = selectedTop3MonthFilter;
+}
+
+function filterTop3ByMonth() {
+    const monthFilter = document.getElementById('top3-month-filter');
+    const quarterFilter = document.getElementById('top3-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedTop3MonthFilter = monthFilter.value;
+    
+    // If month is selected, reset quarter to "all"
+    if (selectedTop3MonthFilter) {
+        selectedTop3QuarterFilter = '';
+        quarterFilter.value = '';
+    }
+    
+    // Reload statistics to apply filter
+    loadStatistics();
+}
+
+function populateTop3QuarterFilter(completedMatches) {
+    const quarterFilter = document.getElementById('top3-quarter-filter');
+    if (!quarterFilter) return;
+    
+    // Get all unique quarters from completed matches
+    const quarterSet = new Set();
+    completedMatches.forEach(match => {
+        if (match.date) {
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const quarterKey = `${year}-${quarter}`;
+            quarterSet.add(quarterKey);
+        }
+    });
+    
+    // Convert to array and sort descending (newest first)
+    const quarters = Array.from(quarterSet).sort((a, b) => {
+        return b.localeCompare(a); // Descending order
+    });
+    
+    // Clear existing options except "Tất cả các quý"
+    quarterFilter.innerHTML = '<option value="">Tất cả các quý</option>';
+    
+    // Add quarter options
+    quarters.forEach(quarterKey => {
+        const [year, quarter] = quarterKey.split('-');
+        const quarterNames = { 'Q1': 'Quý 1', 'Q2': 'Quý 2', 'Q3': 'Quý 3', 'Q4': 'Quý 4' };
+        const quarterName = quarterNames[quarter];
+        const option = document.createElement('option');
+        option.value = quarterKey;
+        option.textContent = `${quarterName}/${year}`;
+        quarterFilter.appendChild(option);
+    });
+    
+    // Set selected value
+    quarterFilter.value = selectedTop3QuarterFilter;
+}
+
+function filterTop3ByQuarter() {
+    const monthFilter = document.getElementById('top3-month-filter');
+    const quarterFilter = document.getElementById('top3-quarter-filter');
+    if (!monthFilter || !quarterFilter) return;
+    
+    selectedTop3QuarterFilter = quarterFilter.value;
+    
+    // If quarter is selected, reset month to "all"
+    if (selectedTop3QuarterFilter) {
+        selectedTop3MonthFilter = '';
+        monthFilter.value = '';
+    }
+    
+    // Reload statistics to apply filter
+    loadStatistics();
 }
 
 function renderMatches() {
@@ -1824,13 +2361,40 @@ function renderParticipationStatistics(completedMatches) {
     const container = document.getElementById('participation-table-wrapper');
     if (!container) return;
     
-    if (completedMatches.length === 0) {
+    // Filter by month or quarter if selected
+    let filteredMatches = completedMatches;
+    if (selectedParticipationMonthFilter) {
+        filteredMatches = completedMatches.filter(match => {
+            if (!match.date) return false;
+            const matchMonth = match.date.substring(0, 7); // Get YYYY-MM
+            return matchMonth === selectedParticipationMonthFilter;
+        });
+    } else if (selectedParticipationQuarterFilter) {
+        filteredMatches = completedMatches.filter(match => {
+            if (!match.date) return false;
+            const [year, month] = match.date.substring(0, 7).split('-');
+            const monthNum = parseInt(month);
+            let quarter;
+            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+            else quarter = 'Q4';
+            const matchQuarter = `${year}-${quarter}`;
+            return matchQuarter === selectedParticipationQuarterFilter;
+        });
+    }
+    
+    // Populate month and quarter filter dropdowns
+    populateParticipationMonthFilter(completedMatches);
+    populateParticipationQuarterFilter(completedMatches);
+    
+    if (filteredMatches.length === 0) {
         container.innerHTML = '<div class="empty-state"><p>Chưa có dữ liệu tham gia trận đấu</p></div>';
         return;
     }
     
-    // Get all unique match dates (sorted)
-    const allMatchDates = [...new Set(completedMatches.map(m => m.date))].sort();
+    // Get all unique match dates (sorted) - use filtered matches
+    const allMatchDates = [...new Set(filteredMatches.map(m => m.date))].sort();
     
     // Build participation data: { playerId: { name, matches: { date: 1/0 }, totalParticipated, totalNotParticipated } }
     const participationData = {};
@@ -1845,8 +2409,8 @@ function renderParticipationStatistics(completedMatches) {
         };
     });
     
-    // Process each match
-    completedMatches.forEach(match => {
+    // Process each match (use filtered matches)
+    filteredMatches.forEach(match => {
         const matchDate = match.date;
         const participantIds = match.participant_ids || [];
         
