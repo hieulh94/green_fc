@@ -34,24 +34,42 @@ class Settings(BaseSettings):
                 raise ValueError(f"Failed to read credentials file: {str(e)}")
         elif self.firebase_credentials:
             # Production: parse from environment variable
+            creds_str = self.firebase_credentials.strip()
+            
+            # Check if empty
+            if not creds_str:
+                raise ValueError(
+                    "FIREBASE_CREDENTIALS is empty. "
+                    "Please set it to a valid JSON string."
+                )
+            
             try:
-                # Try parsing as-is first
-                creds = json.loads(self.firebase_credentials)
-                return creds
+                # Try parsing as-is first (should be compact JSON from jq -c)
+                return json.loads(creds_str)
             except json.JSONDecodeError:
                 try:
-                    # Try replacing escaped newlines
-                    creds_str = self.firebase_credentials.replace('\\n', '\n')
+                    # Try replacing escaped newlines (if someone pasted formatted JSON)
+                    creds_str = creds_str.replace('\\n', '\n')
                     return json.loads(creds_str)
-                except json.JSONDecodeError as e:
-                    raise ValueError(
-                        f"Failed to parse FIREBASE_CREDENTIALS as JSON: {str(e)}. "
-                        "Please ensure it's a valid JSON string."
-                    )
+                except json.JSONDecodeError:
+                    try:
+                        # Try removing all whitespace/newlines (last resort)
+                        creds_str = ''.join(creds_str.split())
+                        return json.loads(creds_str)
+                    except json.JSONDecodeError as e:
+                        # Provide helpful error message
+                        preview = creds_str[:50] if len(creds_str) > 50 else creds_str
+                        raise ValueError(
+                            f"Failed to parse FIREBASE_CREDENTIALS as JSON: {str(e)}. "
+                            f"Preview: {preview}... "
+                            "Please ensure it's a valid JSON string. "
+                            "Use 'cat firebase-credentials.json | jq -c' to get the correct format."
+                        )
         else:
             raise ValueError(
                 "Firebase credentials not found. "
-                "Set FIREBASE_CREDENTIALS or FIREBASE_CREDENTIALS_PATH environment variable."
+                "Set FIREBASE_CREDENTIALS or FIREBASE_CREDENTIALS_PATH environment variable. "
+                "On Vercel: Settings → Environment Variables → Add FIREBASE_CREDENTIALS"
             )
 
 
