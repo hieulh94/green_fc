@@ -27,15 +27,27 @@ class Settings(BaseSettings):
         """Get Firebase credentials as a dictionary"""
         if self.firebase_credentials_path and os.path.exists(self.firebase_credentials_path):
             # Local development: read from file
-            with open(self.firebase_credentials_path, 'r') as f:
-                return json.load(f)
+            try:
+                with open(self.firebase_credentials_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                raise ValueError(f"Failed to read credentials file: {str(e)}")
         elif self.firebase_credentials:
             # Production: parse from environment variable
             try:
-                return json.loads(self.firebase_credentials)
+                # Try parsing as-is first
+                creds = json.loads(self.firebase_credentials)
+                return creds
             except json.JSONDecodeError:
-                # Try parsing as escaped string
-                return json.loads(self.firebase_credentials.replace('\\n', '\n'))
+                try:
+                    # Try replacing escaped newlines
+                    creds_str = self.firebase_credentials.replace('\\n', '\n')
+                    return json.loads(creds_str)
+                except json.JSONDecodeError as e:
+                    raise ValueError(
+                        f"Failed to parse FIREBASE_CREDENTIALS as JSON: {str(e)}. "
+                        "Please ensure it's a valid JSON string."
+                    )
         else:
             raise ValueError(
                 "Firebase credentials not found. "

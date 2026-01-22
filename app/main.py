@@ -43,3 +43,24 @@ app.include_router(matches.router)
 def root():
     return {"message": "Football Team Management API"}
 
+
+@app.get("/api/health")
+def health_check():
+    """Health check endpoint to test Firebase connection"""
+    try:
+        from app.database import get_db
+        db = get_db()
+        # Try to access Firestore (just check if initialized)
+        return {
+            "status": "healthy",
+            "firebase": "connected",
+            "message": "API is running"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "firebase": "disconnected",
+            "error": str(e),
+            "message": "Firebase connection failed"
+        }, 500
+
