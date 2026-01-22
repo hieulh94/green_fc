@@ -238,8 +238,8 @@ function renderPlayers() {
                     ${player.jersey_number ? `<p><strong>Jersey #:</strong> ${player.jersey_number}</p>` : ''}
                     <p><strong>Tổng số bàn thắng:</strong> <span style="color: #28a745; font-weight: bold;">${totalGoals}</span></p>
                     <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                        <button class="btn btn-primary btn-small" onclick="editPlayer(${player.id})">Edit</button>
-                        <button class="btn btn-danger btn-small" onclick="deletePlayer(${player.id})">Delete</button>
+                        <button class="btn btn-primary btn-small" onclick="editPlayer('${String(player.id || '').replace(/'/g, "\\'")}')">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deletePlayer('${String(player.id || '').replace(/'/g, "\\'")}')">Delete</button>
                     </div>
                 </div>
             </div>
@@ -540,8 +540,8 @@ function renderOpponents() {
             ${review ? `<div style="margin: 10px 0;"><strong>Nhận xét:</strong><p style="margin-top: 5px; color: #666; font-style: italic;">${escapeHtml(review)}</p></div>` : ''}
             ${headToHead ? `<div style="margin: 10px 0;"><strong>Thành tích đối đầu:</strong><p style="margin-top: 5px;">${headToHead}</p></div>` : ''}
             <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                <button class="btn btn-primary btn-small" onclick="editOpponent(${opponent.id})">Sửa</button>
-                <button class="btn btn-danger btn-small" onclick="deleteOpponent(${opponent.id})">Xóa</button>
+                <button class="btn btn-primary btn-small" onclick="editOpponent('${String(opponent.id || '').replace(/'/g, "\\'")}')">Sửa</button>
+                <button class="btn btn-danger btn-small" onclick="deleteOpponent('${String(opponent.id || '').replace(/'/g, "\\'")}')">Xóa</button>
             </div>
         </div>
     `;
@@ -1290,10 +1290,10 @@ function renderMatchesList(matchesList, showResult = false) {
                                             </div>
                                             <div class="match-actions" ${!isLoggedIn ? 'style="display: none; flex-basis: 100%;"' : 'style="flex-basis: 100%;"'}">
                                                 ${showResult 
-                                                    ? `<button class="btn btn-primary btn-small" onclick="editMatchResult(${match.id})">Sửa kết quả</button>`
-                                                    : `<button class="btn btn-primary btn-small" onclick="editMatch(${match.id})">Sửa</button>`
+                                                    ? `<button class="btn btn-primary btn-small" onclick="editMatchResult('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa kết quả</button>`
+                                                    : `<button class="btn btn-primary btn-small" onclick="editMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa</button>`
                                                 }
-                                                <button class="btn btn-danger btn-small" onclick="deleteMatch(${match.id})">Xóa</button>
+                                                <button class="btn btn-danger btn-small" onclick="deleteMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Xóa</button>
                                             </div>
                                         </div>
                                         ${goalsList}
@@ -1953,8 +1953,8 @@ function renderMatches() {
                                         <span class="team-name">${escapeHtml(opponentName)}</span>
                                     </div>
                                     <div class="match-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                                        <button class="btn btn-primary btn-small" onclick="editMatch(${match.id})">Sửa</button>
-                                        <button class="btn btn-danger btn-small" onclick="deleteMatch(${match.id})">Xóa</button>
+                                        <button class="btn btn-primary btn-small" onclick="editMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa</button>
+                                        <button class="btn btn-danger btn-small" onclick="deleteMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Xóa</button>
                                     </div>
                                 </div>
                             </div>
@@ -2314,9 +2314,9 @@ async function saveMatchResult(event) {
         const ourScore = parseInt(document.getElementById('match-our-score').value);
         const opponentScore = parseInt(document.getElementById('match-opponent-score').value);
         
-        // Get selected participants
+        // Get selected participants (keep as strings since Firestore uses string IDs)
         const participantCheckboxes = document.querySelectorAll('#match-participants-container input[type="checkbox"]:checked');
-        const participantIds = Array.from(participantCheckboxes).map(cb => parseInt(cb.value));
+        const participantIds = Array.from(participantCheckboxes).map(cb => cb.value);
         
         if (participantIds.length === 0) {
             alert('Vui lòng chọn ít nhất 1 cầu thủ tham gia trận đấu');
@@ -2327,7 +2327,7 @@ async function saveMatchResult(event) {
         const goalRows = document.querySelectorAll('.goal-entry-row');
         const goals = [];
         goalRows.forEach(row => {
-            const playerId = parseInt(row.querySelector('select').value);
+            const playerId = row.querySelector('select').value;
             const goalsCount = parseInt(row.querySelector('input[type="number"]').value);
             if (playerId && goalsCount > 0) {
                 goals.push({ player_id: playerId, goals: goalsCount });

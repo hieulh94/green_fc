@@ -9,7 +9,11 @@ class Settings(BaseSettings):
     firebase_credentials_path: str = ""  # Path to credentials file (for local dev)
     environment: str = "development"
     
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=".env", 
+        case_sensitive=False,
+        extra="ignore"  # Ignore extra fields like DATABASE_URL (from old PostgreSQL setup)
+    )
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

@@ -403,6 +403,31 @@
     <script src="positions.js"></script>
     <script src="api.js"></script>
     <script src="app.js"></script>
+    <script>
+        // Defensive code: Ensure all onclick handlers are defined
+        // This prevents errors if browser extensions inject code
+        window.addEventListener('error', function(e) {
+            if (e.message && e.message.includes('is not defined') && e.message.includes('onclick')) {
+                console.warn('Possible browser extension interference detected:', e.message);
+                // Don't prevent default, just log the warning
+            }
+        });
+        
+        // Verify critical functions are loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            const requiredFunctions = [
+                'openLoginModal', 'logout', 'openPlayerModal', 'openOpponentModal',
+                'openMatchModal', 'switchScheduleSubTab', 'closeTeamProfile'
+            ];
+            
+            const missingFunctions = requiredFunctions.filter(fn => typeof window[fn] !== 'function');
+            
+            if (missingFunctions.length > 0) {
+                console.error('Missing functions:', missingFunctions);
+                console.error('Please check if app.js is loaded correctly');
+            }
+        });
+    </script>
 </body>
 </html>
 

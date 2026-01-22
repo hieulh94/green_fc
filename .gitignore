@@ -23,6 +23,12 @@ firebase-credentials.json
 *.swp
 *.swo
 
+# Temporary/swap files (editor backup files)
+.!*!
+*~
+.*.swp
+.*.swo
+
 # Database
 *.db
 *.sqlite
