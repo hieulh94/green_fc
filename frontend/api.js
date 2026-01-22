@@ -26,7 +26,23 @@ async function apiRequest(endpoint, options = {}) {
             return null; // No content
         }
 
-        const data = await response.json();
+        // Check content type before parsing JSON
+        const contentType = response.headers.get('content-type');
+        let data;
+        
+        if (contentType && contentType.includes('application/json')) {
+            try {
+                data = await response.json();
+            } catch (jsonError) {
+                // If JSON parsing fails, try to get text
+                const text = await response.text();
+                throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+            }
+        } else {
+            // Not JSON, get text response
+            const text = await response.text();
+            throw new Error(`Server error (${response.status}): ${text.substring(0, 200)}`);
+        }
         
         if (!response.ok) {
             // Handle validation errors (422)

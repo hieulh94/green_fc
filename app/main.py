@@ -1,9 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pathlib import Path
+import logging
+import traceback
 
 from app.routers import teams, players, uploads, opponents, matches
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="GREEN FC",
@@ -31,6 +37,28 @@ if static_dir.exists() and static_dir.is_dir():
     except Exception:
         # Ignore if static files can't be mounted (e.g., in serverless)
         pass
+
+# Global exception handler to ensure JSON responses
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions and return JSON"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": str(exc),
+            "type": type(exc).__name__,
+            "message": "Internal server error"
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors"""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()}
+    )
 
 app.include_router(teams.router)
 app.include_router(players.router)

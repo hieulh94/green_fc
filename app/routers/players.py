@@ -16,8 +16,17 @@ def get_players(
     team_id: Optional[str] = Query(None, description="Filter by team ID"),
     db: Client = Depends(get_db)
 ):
-    service = PlayerService(db)
-    return service.get_players(skip=skip, limit=limit, team_id=team_id)
+    try:
+        service = PlayerService(db)
+        return service.get_players(skip=skip, limit=limit, team_id=team_id)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error getting players: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error loading players: {str(e)}"
+        )
 
 
 @router.get("/{player_id}", response_model=PlayerResponse)
