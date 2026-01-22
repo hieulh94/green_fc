@@ -2061,7 +2061,7 @@ async function saveMatch(event) {
             // Update: send fields that can be changed (date, opponent_id, is_completed)
             // Don't send result, scores as they should be updated separately after the match
             const formData = {
-                opponent_id: parseInt(document.getElementById('match-opponent-id').value),
+                opponent_id: document.getElementById('match-opponent-id').value,
                 date: dateStr,
                 is_completed: isCompleted,
             };
@@ -2069,7 +2069,7 @@ async function saveMatch(event) {
         } else {
             // Create: use default values
             const formData = {
-                opponent_id: parseInt(document.getElementById('match-opponent-id').value),
+                opponent_id: document.getElementById('match-opponent-id').value,
                 date: dateStr,
                 result: 'draw', // Default value (sẽ được cập nhật sau khi thi đấu)
                 our_score: 0,
