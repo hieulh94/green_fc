@@ -13,6 +13,10 @@ ENV/
 .env
 .env.local
 
+# Firebase
+firebase-credentials.json
+*firebase*.json
+
 # IDE
 .vscode/
 .idea/

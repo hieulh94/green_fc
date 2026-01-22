@@ -1,27 +1,29 @@
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from google.cloud.firestore import Client
 from typing import List, Optional
 
 from app.repositories.player_repository import PlayerRepository
 from app.repositories.team_repository import TeamRepository
-from app.models.match_goal import MatchGoal
+from app.repositories.match_goal_repository import MatchGoalRepository
 from app.schemas.player import PlayerCreate, PlayerUpdate, PlayerResponse
 
 
 class PlayerService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Client):
         self.repository = PlayerRepository(db)
         self.team_repository = TeamRepository(db)
+        self.goal_repository = MatchGoalRepository(db)
         self.db = db
 
-    def _calculate_total_goals(self, player_id: int) -> int:
+    def _calculate_total_goals(self, player_id: str) -> int:
         """Calculate total goals for a player from match_goals"""
-        result = self.db.query(func.sum(MatchGoal.goals)).filter(
-            MatchGoal.player_id == player_id
-        ).scalar()
-        return int(result) if result else 0
+        goals = self.goal_repository.db.collection("match_goals").where("player_id", "==", player_id).stream()
+        total = 0
+        for goal_doc in goals:
+            data = goal_doc.to_dict()
+            total += data.get("goals", 0)
+        return total
 
-    def get_player(self, player_id: int) -> Optional[PlayerResponse]:
+    def get_player(self, player_id: str) -> Optional[PlayerResponse]:
         player = self.repository.get_by_id(player_id)
         if not player:
             return None
@@ -32,7 +34,7 @@ class PlayerService:
         
         return PlayerResponse.model_validate(player)
 
-    def get_players(self, skip: int = 0, limit: int = 100, team_id: Optional[int] = None) -> List[PlayerResponse]:
+    def get_players(self, skip: int = 0, limit: int = 100, team_id: Optional[str] = None) -> List[PlayerResponse]:
         players = self.repository.get_all(skip=skip, limit=limit, team_id=team_id)
         
         # Calculate total_goals for each player
@@ -63,7 +65,7 @@ class PlayerService:
         
         return PlayerResponse.model_validate(created_player)
 
-    def update_player(self, player_id: int, player_update: PlayerUpdate) -> Optional[PlayerResponse]:
+    def update_player(self, player_id: str, player_update: PlayerUpdate) -> Optional[PlayerResponse]:
         # Validate team exists if team_id is being updated
         if player_update.team_id is not None:
             team = self.team_repository.get_by_id(player_update.team_id)
@@ -89,6 +91,5 @@ class PlayerService:
         
         return PlayerResponse.model_validate(player)
 
-    def delete_player(self, player_id: int) -> bool:
+    def delete_player(self, player_id: str) -> bool:
         return self.repository.delete(player_id)
-

@@ -3,9 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-# Import all models to ensure they are registered with SQLAlchemy
-from app.models import Team, Player, Opponent, Match, MatchGoal, MatchParticipant
-
 from app.routers import teams, players, uploads, opponents, matches
 
 app = FastAPI(

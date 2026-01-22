@@ -1,49 +1,72 @@
-from sqlalchemy.orm import Session
+from google.cloud.firestore import Client
 from typing import List, Optional
-
 from app.models.team import Team
 from app.schemas.team import TeamCreate, TeamUpdate
 
 
 class TeamRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Client):
         self.db = db
+        self.collection = "teams"
 
-    def get_by_id(self, team_id: int) -> Optional[Team]:
-        return self.db.query(Team).filter(Team.id == team_id).first()
+    def get_by_id(self, team_id: str) -> Optional[Team]:
+        doc = self.db.collection(self.collection).document(team_id).get()
+        if not doc.exists:
+            return None
+        data = doc.to_dict()
+        data["id"] = doc.id
+        return Team(**data)
 
     def get_all(self, skip: int = 0, limit: int = 100) -> List[Team]:
-        return self.db.query(Team).offset(skip).limit(limit).all()
+        query = self.db.collection(self.collection).offset(skip).limit(limit)
+        docs = query.stream()
+        teams = []
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            teams.append(Team(**data))
+        return teams
 
     def get_by_name(self, name: str) -> Optional[Team]:
-        return self.db.query(Team).filter(Team.name == name).first()
+        docs = self.db.collection(self.collection).where("name", "==", name).limit(1).stream()
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            return Team(**data)
+        return None
 
     def create(self, team: TeamCreate) -> Team:
-        db_team = Team(**team.model_dump())
-        self.db.add(db_team)
-        self.db.commit()
-        self.db.refresh(db_team)
-        return db_team
+        data = team.model_dump(exclude={"id"})
+        # Convert date objects to strings if any
+        for key, value in data.items():
+            if hasattr(value, 'isoformat'):
+                data[key] = value.isoformat()
+        doc_ref = self.db.collection(self.collection).add(data)[1]
+        doc = doc_ref.get()
+        doc_data = doc.to_dict()
+        doc_data["id"] = doc.id
+        return Team(**doc_data)
 
-    def update(self, team_id: int, team_update: TeamUpdate) -> Optional[Team]:
-        db_team = self.get_by_id(team_id)
-        if not db_team:
+    def update(self, team_id: str, team_update: TeamUpdate) -> Optional[Team]:
+        doc_ref = self.db.collection(self.collection).document(team_id)
+        if not doc_ref.get().exists:
             return None
 
-        update_data = team_update.model_dump(exclude_unset=True)
+        update_data = team_update.model_dump(exclude_unset=True, exclude={"id"})
+        # Convert date objects to strings if any
         for key, value in update_data.items():
-            setattr(db_team, key, value)
+            if hasattr(value, 'isoformat'):
+                update_data[key] = value.isoformat()
+        
+        doc_ref.update(update_data)
+        doc = doc_ref.get()
+        doc_data = doc.to_dict()
+        doc_data["id"] = doc.id
+        return Team(**doc_data)
 
-        self.db.commit()
-        self.db.refresh(db_team)
-        return db_team
-
-    def delete(self, team_id: int) -> bool:
-        db_team = self.get_by_id(team_id)
-        if not db_team:
+    def delete(self, team_id: str) -> bool:
+        doc_ref = self.db.collection(self.collection).document(team_id)
+        if not doc_ref.get().exists:
             return False
-
-        self.db.delete(db_team)
-        self.db.commit()
+        doc_ref.delete()
         return True
-

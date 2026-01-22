@@ -1,56 +1,29 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
+import firebase_admin
+from firebase_admin import credentials, firestore
 from app.config import settings
 
-# Import psycopg2 to ensure it's available
-try:
-    import psycopg2
-except ImportError:
+# Initialize Firebase Admin SDK
+if not firebase_admin._apps:
     try:
-        import psycopg2_binary as psycopg2
-    except ImportError:
-        raise ImportError(
-            "psycopg2-binary is required but not installed. "
-            "Please ensure it's in requirements.txt"
+        cred_dict = settings.get_firebase_credentials_dict()
+        cred = credentials.Certificate(cred_dict)
+        
+        firebase_admin.initialize_app(
+            cred,
+            {
+                'projectId': settings.firebase_project_id or cred_dict.get('project_id')
+            }
+        )
+    except Exception as e:
+        raise ValueError(
+            f"Failed to initialize Firebase Admin SDK: {str(e)}. "
+            "Please check FIREBASE_CREDENTIALS and FIREBASE_PROJECT_ID environment variables."
         )
 
-# Validate database_url before creating engine
-if not settings.database_url:
-    raise ValueError(
-        "DATABASE_URL environment variable is not set. "
-        "Please set it in Vercel Environment Variables."
-    )
-
-# Ensure connection string has correct format for PostgreSQL
-database_url = settings.database_url
-
-# Always use postgresql+psycopg2:// to explicitly use psycopg2 driver
-if database_url.startswith("postgresql://"):
-    # Replace postgresql:// with postgresql+psycopg2:// to explicitly use psycopg2
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
-elif not database_url.startswith("postgresql+psycopg2://"):
-    # If it doesn't start with postgresql:// or postgresql+psycopg2://, add prefix
-    if not database_url.startswith("postgresql"):
-        database_url = f"postgresql+psycopg2://{database_url}"
-
-engine = create_engine(
-    database_url, 
-    echo=settings.environment == "development",
-    pool_pre_ping=True,  # Verify connections before using
-    pool_recycle=300,     # Recycle connections after 5 minutes
-    connect_args={"connect_timeout": 10}  # Add connection timeout
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base = declarative_base()
+# Get Firestore client
+db = firestore.client()
 
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
+    """Dependency to get Firestore database client"""
+    return db

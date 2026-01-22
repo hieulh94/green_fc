@@ -3,12 +3,12 @@ from typing import Optional
 
 
 class MatchGoalBase(BaseModel):
-    player_id: int
+    player_id: str
     goals: int = 1
 
 
 class MatchGoalCreate(MatchGoalBase):
-    match_id: int
+    match_id: str
 
 
 class MatchGoalUpdate(BaseModel):
@@ -16,8 +16,8 @@ class MatchGoalUpdate(BaseModel):
 
 
 class MatchGoalResponse(MatchGoalBase):
-    id: int
-    match_id: int
+    id: str
+    match_id: str
     player_name: Optional[str] = None
     player_jersey_number: Optional[int] = None
 

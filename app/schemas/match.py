@@ -5,7 +5,7 @@ from typing import Optional, List
 
 class MatchBase(BaseModel):
     date: date_type
-    opponent_id: int
+    opponent_id: str
     result: str  # 'win', 'lose', 'draw'
     our_score: int = 0
     opponent_score: int = 0
@@ -19,7 +19,7 @@ class MatchCreate(MatchBase):
 
 class MatchUpdate(BaseModel):
     date: Optional[date_type] = None
-    opponent_id: Optional[int] = None
+    opponent_id: Optional[str] = None
     result: Optional[str] = None
     our_score: Optional[int] = None
     opponent_score: Optional[int] = None
@@ -28,10 +28,10 @@ class MatchUpdate(BaseModel):
 
 
 class MatchResponse(MatchBase):
-    id: int
+    id: str
     opponent: Optional["OpponentResponse"] = None
     goals: List["MatchGoalResponse"] = []
-    participant_ids: List[int] = []
+    participant_ids: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 

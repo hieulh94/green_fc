@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from google.cloud.firestore import Client
 from typing import List, Optional
 
 from app.repositories.team_repository import TeamRepository
@@ -6,10 +6,10 @@ from app.schemas.team import TeamCreate, TeamUpdate, TeamResponse
 
 
 class TeamService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Client):
         self.repository = TeamRepository(db)
 
-    def get_team(self, team_id: int) -> Optional[TeamResponse]:
+    def get_team(self, team_id: str) -> Optional[TeamResponse]:
         team = self.repository.get_by_id(team_id)
         return TeamResponse.model_validate(team) if team else None
 
@@ -26,10 +26,9 @@ class TeamService:
         created_team = self.repository.create(team)
         return TeamResponse.model_validate(created_team)
 
-    def update_team(self, team_id: int, team_update: TeamUpdate) -> Optional[TeamResponse]:
+    def update_team(self, team_id: str, team_update: TeamUpdate) -> Optional[TeamResponse]:
         team = self.repository.update(team_id, team_update)
         return TeamResponse.model_validate(team) if team else None
 
-    def delete_team(self, team_id: int) -> bool:
+    def delete_team(self, team_id: str) -> bool:
         return self.repository.delete(team_id)
-

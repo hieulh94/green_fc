@@ -18,7 +18,7 @@ class TeamUpdate(BaseModel):
 
 
 class TeamResponse(TeamBase):
-    id: int
+    id: str
 
     model_config = ConfigDict(from_attributes=True)
 

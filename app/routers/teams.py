@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from google.cloud.firestore import Client
 from typing import List
 
 from app.database import get_db
@@ -10,13 +10,13 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 
 
 @router.get("/", response_model=List[TeamResponse])
-def get_teams(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_teams(skip: int = 0, limit: int = 100, db: Client = Depends(get_db)):
     service = TeamService(db)
     return service.get_teams(skip=skip, limit=limit)
 
 
 @router.get("/{team_id}", response_model=TeamResponse)
-def get_team(team_id: int, db: Session = Depends(get_db)):
+def get_team(team_id: str, db: Client = Depends(get_db)):
     service = TeamService(db)
     team = service.get_team(team_id)
     if not team:
@@ -28,7 +28,7 @@ def get_team(team_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/", response_model=TeamResponse, status_code=status.HTTP_201_CREATED)
-def create_team(team: TeamCreate, db: Session = Depends(get_db)):
+def create_team(team: TeamCreate, db: Client = Depends(get_db)):
     service = TeamService(db)
     try:
         return service.create_team(team)
@@ -40,7 +40,7 @@ def create_team(team: TeamCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{team_id}", response_model=TeamResponse)
-def update_team(team_id: int, team_update: TeamUpdate, db: Session = Depends(get_db)):
+def update_team(team_id: str, team_update: TeamUpdate, db: Client = Depends(get_db)):
     service = TeamService(db)
     team = service.update_team(team_id, team_update)
     if not team:
@@ -52,11 +52,10 @@ def update_team(team_id: int, team_update: TeamUpdate, db: Session = Depends(get
 
 
 @router.delete("/{team_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_team(team_id: int, db: Session = Depends(get_db)):
+def delete_team(team_id: str, db: Client = Depends(get_db)):
     service = TeamService(db)
     if not service.delete_team(team_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Team with id {team_id} not found"
         )
-
