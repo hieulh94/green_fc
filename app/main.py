@@ -39,12 +39,12 @@ app.include_router(opponents.router)
 app.include_router(matches.router)
 
 
-@app.get("/api")
+@app.get("/")
 def root():
     return {"message": "Football Team Management API"}
 
 
-@app.get("/api/health")
+@app.get("/health")
 def health_check():
     """Health check endpoint to test Firebase connection"""
     try:
