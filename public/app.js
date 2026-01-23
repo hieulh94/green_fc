@@ -2245,11 +2245,15 @@ function renderMatchParticipants(selectedPlayerIds = []) {
         return;
     }
     
+    // Normalize selectedPlayerIds to strings for comparison
+    const normalizedSelectedIds = selectedPlayerIds.map(id => String(id));
+    
     container.innerHTML = players.map(player => {
-        const isChecked = selectedPlayerIds.includes(player.id);
+        const playerIdStr = String(player.id);
+        const isChecked = normalizedSelectedIds.includes(playerIdStr);
         return `
             <label class="position-checkbox" style="display: flex; align-items: center; padding: 8px 12px; border: 2px solid #e9ecef; border-radius: 6px; cursor: pointer; transition: all 0.2s; background: white; margin-bottom: 8px;">
-                <input type="checkbox" value="${player.id}" ${isChecked ? 'checked' : ''} style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;">
+                <input type="checkbox" value="${playerIdStr}" ${isChecked ? 'checked' : ''} style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;">
                 <span style="flex: 1; color: #333; font-size: 0.95em;">${escapeHtml(player.name)}${player.jersey_number ? ` (#${player.jersey_number})` : ''}</span>
             </label>
         `;
@@ -2312,7 +2316,7 @@ async function saveMatchResult(event) {
         
         // Get selected participants
         const participantCheckboxes = document.querySelectorAll('#match-participants-container input[type="checkbox"]:checked');
-        const participantIds = Array.from(participantCheckboxes).map(cb => parseInt(cb.value));
+        const participantIds = Array.from(participantCheckboxes).map(cb => String(cb.value));
         
         if (participantIds.length === 0) {
             alert('Vui lòng chọn ít nhất 1 cầu thủ tham gia trận đấu');
@@ -2323,7 +2327,7 @@ async function saveMatchResult(event) {
         const goalRows = document.querySelectorAll('.goal-entry-row');
         const goals = [];
         goalRows.forEach(row => {
-            const playerId = parseInt(row.querySelector('select').value);
+            const playerId = String(row.querySelector('select').value);
             const goalsCount = parseInt(row.querySelector('input[type="number"]').value);
             if (playerId && goalsCount > 0) {
                 goals.push({ player_id: playerId, goals: goalsCount });
