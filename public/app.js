@@ -1288,10 +1288,10 @@ function renderMatchesList(matchesList, showResult = false) {
                                             </div>
                                             <div class="match-actions" ${!isLoggedIn ? 'style="display: none; flex-basis: 100%;"' : 'style="flex-basis: 100%;"'}">
                                                 ${showResult 
-                                                    ? `<button class="btn btn-primary btn-small" onclick="editMatchResult(${match.id})">Sửa kết quả</button>`
-                                                    : `<button class="btn btn-primary btn-small" onclick="editMatch(${match.id})">Sửa</button>`
+                                                    ? `<button class="btn btn-primary btn-small" onclick="editMatchResult('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa kết quả</button>`
+                                                    : `<button class="btn btn-primary btn-small" onclick="editMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa</button>`
                                                 }
-                                                <button class="btn btn-danger btn-small" onclick="deleteMatch(${match.id})">Xóa</button>
+                                                <button class="btn btn-danger btn-small" onclick="deleteMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Xóa</button>
                                             </div>
                                         </div>
                                         ${goalsList}
@@ -1951,8 +1951,8 @@ function renderMatches() {
                                         <span class="team-name">${escapeHtml(opponentName)}</span>
                                     </div>
                                     <div class="match-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                                        <button class="btn btn-primary btn-small" onclick="editMatch(${match.id})">Sửa</button>
-                                        <button class="btn btn-danger btn-small" onclick="deleteMatch(${match.id})">Xóa</button>
+                                        <button class="btn btn-primary btn-small" onclick="editMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa</button>
+                                        <button class="btn btn-danger btn-small" onclick="deleteMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Xóa</button>
                                     </div>
                                 </div>
                             </div>
