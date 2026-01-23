@@ -33,6 +33,10 @@ firebase-credentials.json
 *.db
 *.sqlite
 
+# Log files
+*.log
+*.log.*
+
 # Alembic
 alembic/versions/*.pyc
 
