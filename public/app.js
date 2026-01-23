@@ -1279,11 +1279,11 @@ function renderMatchesList(matchesList, showResult = false) {
                                         <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: wrap; width: 100%;" class="match-main-content">
                                             <div class="match-team-left" style="min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; justify-content: flex-start;">
                                                 <span class="team-name" style="display: block; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; flex: 1; text-align: left;">FC GREEN</span>
-                                                ${leftScore ? `<div class="match-score-left" style="flex-shrink: 0;">${leftScore}</div>` : ''}
+                                                ${leftScore !== '' ? `<div class="match-score-left" style="flex-shrink: 0;">${leftScore}</div>` : ''}
                                             </div>
                                             <div class="match-vs" style="${resultBadgeStyle} flex-shrink: 0;">${resultBadgeText}</div>
                                             <div class="match-team-right" style="min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; justify-content: flex-end;">
-                                                ${rightScore ? `<div class="match-score-right" style="flex-shrink: 0;">${rightScore}</div>` : ''}
+                                                ${rightScore !== '' ? `<div class="match-score-right" style="flex-shrink: 0;">${rightScore}</div>` : ''}
                                                 <span class="team-name" style="display: block; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; flex: 1; text-align: right;">${escapeHtml(opponentName)}</span>
                                             </div>
                                             <div class="match-actions" ${!isLoggedIn ? 'style="display: none; flex-basis: 100%;"' : 'style="flex-basis: 100%;"'}">
