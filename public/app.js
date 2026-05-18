@@ -72,6 +72,13 @@ function hideLoading() {
     document.getElementById('loading').style.display = 'none';
 }
 
+/** String id an toàn cho onclick="fn('…')" (ID Firestore là chuỗi, không được dùng như tên biến). */
+function escapeForOnclickArg(value) {
+    return String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'");
+}
+
 // Teams functions
 async function loadTeams() {
     showLoading();
@@ -137,7 +144,7 @@ function openTeamProfile(teamId) {
     if (!team) return;
     
     content.innerHTML = `
-        <form id="team-profile-form" onsubmit="saveTeamProfile(event, ${team.id})">
+        <form id="team-profile-form" onsubmit="saveTeamProfile(event, '${escapeForOnclickArg(team.id)}')">
             <div class="form-group">
                 <label>Team Name *</label>
                 <input type="text" id="team-profile-name" value="${escapeHtml(team.name)}" required>
@@ -240,8 +247,8 @@ function renderPlayers() {
                     ${player.jersey_number ? `<p><strong>Jersey #:</strong> ${player.jersey_number}</p>` : ''}
                     <p><strong>Tổng số bàn thắng:</strong> <span style="color: #28a745; font-weight: bold;">${totalGoals}</span></p>
                     <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                        <button class="btn btn-primary btn-small" onclick="editPlayer(${player.id})">Edit</button>
-                        <button class="btn btn-danger btn-small" onclick="deletePlayer(${player.id})">Delete</button>
+                        <button class="btn btn-primary btn-small" onclick="editPlayer('${escapeForOnclickArg(player.id)}')">Edit</button>
+                        <button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeForOnclickArg(player.id)}')">Delete</button>
                     </div>
                 </div>
             </div>
@@ -542,8 +549,8 @@ function renderOpponents() {
             ${review ? `<div style="margin: 10px 0;"><strong>Nhận xét:</strong><p style="margin-top: 5px; color: #666; font-style: italic;">${escapeHtml(review)}</p></div>` : ''}
             ${headToHead ? `<div style="margin: 10px 0;"><strong>Thành tích đối đầu:</strong><p style="margin-top: 5px;">${headToHead}</p></div>` : ''}
             <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                <button class="btn btn-primary btn-small" onclick="editOpponent(${opponent.id})">Sửa</button>
-                <button class="btn btn-danger btn-small" onclick="deleteOpponent(${opponent.id})">Xóa</button>
+                <button class="btn btn-primary btn-small" onclick="editOpponent('${escapeForOnclickArg(opponent.id)}')">Sửa</button>
+                <button class="btn btn-danger btn-small" onclick="deleteOpponent('${escapeForOnclickArg(opponent.id)}')">Xóa</button>
             </div>
         </div>
     `;
