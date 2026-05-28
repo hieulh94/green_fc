@@ -14,6 +14,110 @@ let openOpponentModalCallback = null; // Callback khi thêm opponent từ match 
 let isLoggedIn = false; // Login state
 let goalsTableSortState = { column: 'total', direction: 'desc' }; // 'asc' or 'desc'
 let participationTableSortState = { column: 'rate', direction: 'desc' }; // 'asc' or 'desc'
+const CACHE_STORAGE_PREFIX = 'fcgreen_cache_';
+const dataCache = {};
+let playersLoadPromise = null;
+
+function getCachedData(cacheKey) {
+    if (dataCache[cacheKey]?.data != null) {
+        return dataCache[cacheKey].data;
+    }
+    try {
+        const raw = localStorage.getItem(CACHE_STORAGE_PREFIX + cacheKey);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            dataCache[cacheKey] = { data: parsed, fetchedAt: Date.now() };
+            return parsed;
+        }
+    } catch (e) {
+        console.warn('Cache read failed:', cacheKey, e);
+    }
+    return null;
+}
+
+function setCachedData(cacheKey, data) {
+    dataCache[cacheKey] = { data, fetchedAt: Date.now() };
+    try {
+        localStorage.setItem(CACHE_STORAGE_PREFIX + cacheKey, JSON.stringify(data));
+    } catch (e) {
+        console.warn('Cache write failed:', cacheKey, e);
+    }
+}
+
+function invalidateCache(cacheKey) {
+    delete dataCache[cacheKey];
+    try {
+        localStorage.removeItem(CACHE_STORAGE_PREFIX + cacheKey);
+    } catch (e) {
+        console.warn('Cache invalidate failed:', cacheKey, e);
+    }
+}
+
+function invalidateMatchesCache() {
+    invalidateCache('matches');
+}
+
+function dataEquals(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** Stale-while-revalidate: fill UI from cache/memory first, fetch API, re-render only if data changed */
+async function refreshResource(cacheKey, fetchFn, applyFn, { forceRefresh = false, staleData = null } = {}) {
+    const cached = !forceRefresh ? (getCachedData(cacheKey) ?? staleData) : null;
+    let showedLoading = false;
+
+    if (cached != null) {
+        applyFn(cached);
+    } else {
+        showLoading();
+        showedLoading = true;
+    }
+
+    try {
+        const fresh = await fetchFn();
+        const changed = cached == null || !dataEquals(cached, fresh);
+        if (changed) {
+            setCachedData(cacheKey, fresh);
+            applyFn(fresh);
+        }
+        return fresh;
+    } catch (error) {
+        if (cached != null) {
+            console.warn(`Using cached "${cacheKey}" after fetch error`, error);
+            return cached;
+        }
+        throw error;
+    } finally {
+        if (showedLoading) {
+            hideLoading();
+        }
+    }
+}
+
+async function ensurePlayersLoaded({ forceRefresh = false, skipRender = false } = {}) {
+    if (players.length > 0 && !forceRefresh) {
+        return players;
+    }
+    if (playersLoadPromise) {
+        return playersLoadPromise;
+    }
+
+    playersLoadPromise = refreshResource(
+        'players',
+        () => playersAPI.getAll(),
+        (data) => {
+            players = data;
+            if (!skipRender) {
+                renderPlayers();
+            }
+        },
+        { forceRefresh }
+    ).finally(() => {
+        playersLoadPromise = null;
+    });
+
+    return playersLoadPromise;
+}
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
@@ -22,9 +126,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     setupTabs();
     loadTeams();
-    loadPlayers();
     // Load opponents and matches, then render opponents after both are loaded
     Promise.all([
+        ensurePlayersLoaded(),
         loadOpponents(),
         loadMatches()
     ]).then(() => {
@@ -63,13 +167,21 @@ function setupTabs() {
     });
 }
 
-// Loading indicator
+// Loading indicator (refcount avoids stuck overlay when multiple requests overlap)
+let loadingCount = 0;
+
 function showLoading() {
+    loadingCount += 1;
     document.getElementById('loading').style.display = 'flex';
 }
 
 function hideLoading() {
-    document.getElementById('loading').style.display = 'none';
+    if (loadingCount > 0) {
+        loadingCount -= 1;
+    }
+    if (loadingCount === 0) {
+        document.getElementById('loading').style.display = 'none';
+    }
 }
 
 /** String id an toàn cho onclick="fn('…')" (ID Firestore là chuỗi, không được dùng như tên biến). */
@@ -194,15 +306,19 @@ async function saveTeamProfile(event, teamId) {
 }
 
 // Players functions
-async function loadPlayers() {
-    showLoading();
+async function loadPlayers(forceRefresh = false) {
     try {
-        players = await playersAPI.getAll();
-        renderPlayers();
+        await refreshResource(
+            'players',
+            () => playersAPI.getAll(),
+            (data) => {
+                players = data;
+                renderPlayers();
+            },
+            { forceRefresh }
+        );
     } catch (error) {
         alert('Error loading players: ' + error.message);
-    } finally {
-        hideLoading();
     }
 }
 
@@ -429,7 +545,8 @@ async function savePlayer(event) {
             await playersAPI.create(formData);
         }
         closePlayerModal();
-        await loadPlayers();
+        invalidateCache('players');
+        await loadPlayers(true);
     } catch (error) {
         alert('Error saving player: ' + error.message);
     } finally {
@@ -449,7 +566,8 @@ async function deletePlayer(id) {
     showLoading();
     try {
         await playersAPI.delete(id);
-        await loadPlayers();
+        invalidateCache('players');
+        await loadPlayers(true);
     } catch (error) {
         alert('Error deleting player: ' + error.message);
     } finally {
@@ -471,17 +589,20 @@ function setupTabChangeListeners() {
 }
 
 // Opponents functions
-async function loadOpponents() {
-    showLoading();
+async function loadOpponents(forceRefresh = false) {
     try {
-        opponents = await opponentsAPI.getAll();
-        // Don't render here - wait for matches to load first
-        // renderOpponents() will be called after both opponents and matches are loaded
-        updateOpponentSelects();
+        await refreshResource(
+            'opponents',
+            () => opponentsAPI.getAll(),
+            (data) => {
+                opponents = data;
+                // renderOpponents() runs after matches load (head-to-head needs matches)
+                updateOpponentSelects();
+            },
+            { forceRefresh }
+        );
     } catch (error) {
         alert('Error loading opponents: ' + error.message);
-    } finally {
-        hideLoading();
     }
 }
 
@@ -626,7 +747,8 @@ async function saveOpponent(event) {
             savedOpponent = await opponentsAPI.create(formData);
         }
         closeOpponentModal();
-        await loadOpponents();
+        invalidateCache('opponents');
+        await loadOpponents(true);
         
         // Nếu có callback (được gọi từ match modal), cập nhật select và gọi callback
         if (openOpponentModalCallback && savedOpponent) {
@@ -654,7 +776,8 @@ async function deleteOpponent(id) {
     showLoading();
     try {
         await opponentsAPI.delete(id);
-        await loadOpponents();
+        invalidateCache('opponents');
+        await loadOpponents(true);
     } catch (error) {
         alert('Error deleting opponent: ' + error.message);
     } finally {
@@ -663,24 +786,49 @@ async function deleteOpponent(id) {
 }
 
 // Statistics functions
-async function loadStatistics() {
-    showLoading();
+function applyStatisticsFromMatches(allMatches) {
+    matches = allMatches;
+    const completedMatches = allMatches.filter(
+        m => m.is_completed === true || m.is_completed === 1
+    );
+    renderGoalStatistics(completedMatches);
+    renderParticipationStatistics(completedMatches);
+}
+
+async function loadStatistics(forceRefresh = false) {
     try {
-        // Ensure players are loaded
         if (players.length === 0) {
-            await loadPlayers();
+            await ensurePlayersLoaded({ skipRender: true });
         }
-        
-        // Load all completed matches with goals
-        const allMatches = await matchesAPI.getAll();
-        const completedMatches = allMatches.filter(m => m.is_completed === true || m.is_completed === 1);
-        renderGoalStatistics(completedMatches);
-        renderParticipationStatistics(completedMatches);
+
+        const snapshot = !forceRefresh
+            ? (getCachedData('matches') ?? (matches.length > 0 ? matches : null))
+            : null;
+
+        // Already have data: render immediately, refresh in background (no loading overlay)
+        if (snapshot != null) {
+            applyStatisticsFromMatches(snapshot);
+            try {
+                const fresh = await matchesAPI.getAll();
+                if (!dataEquals(snapshot, fresh)) {
+                    setCachedData('matches', fresh);
+                    applyStatisticsFromMatches(fresh);
+                }
+            } catch (error) {
+                console.warn('Background statistics refresh failed, keeping current data', error);
+            }
+            return;
+        }
+
+        await refreshResource(
+            'matches',
+            () => matchesAPI.getAll(),
+            applyStatisticsFromMatches,
+            { forceRefresh }
+        );
     } catch (error) {
         console.error('Error loading goal statistics:', error);
         alert('Error loading goal statistics: ' + error.message);
-    } finally {
-        hideLoading();
     }
 }
 
@@ -825,8 +973,11 @@ function renderGoalStatistics(completedMatches) {
     // Render top 3 goalscorers
     renderTopGoalscorers(top3PlayerGoalsMap);
     
-    // Render bubble chart
-    renderBubbleChart(playerGoalsMap);
+    // Bubble chart disabled to keep statistics tab fast on click
+    const bubbleContainer = document.getElementById('goals-bubbles-container');
+    if (bubbleContainer) {
+        bubbleContainer.innerHTML = '<div class="empty-state"><p>Biểu đồ bong bóng đã tắt để tối ưu tốc độ tải</p></div>';
+    }
     
     // Render goals table
     renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates);
@@ -1058,6 +1209,39 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
             return `<th>${day}/${month}</th>`;
         }).join('');
     }
+
+    // Build mobile card layout for very small screens
+    const goalsCards = playersWithGoals.map(({ player, playerData, totalGoals }) => {
+        let detailsHtml = '';
+        if (allMatchDates.length > 0) {
+            detailsHtml = allMatchDates.map(date => {
+                const dateObj = new Date(date + 'T00:00:00');
+                const day = String(dateObj.getDate()).padStart(2, '0');
+                const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+                let goalsInMatch = 0;
+                if (playerData) {
+                    const matchData = playerData.matches.find(m => m.date === date);
+                    if (matchData) goalsInMatch = matchData.goals;
+                }
+                return `
+                    <div class="stats-mobile-row">
+                        <span>${day}/${month}</span>
+                        <strong>${goalsInMatch}</strong>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        return `
+            <article class="stats-mobile-card">
+                <div class="stats-mobile-card-header">
+                    <h4>${escapeHtml(player.name)}</h4>
+                    <span class="stats-mobile-total">${totalGoals} bàn</span>
+                </div>
+                ${detailsHtml ? `<div class="stats-mobile-card-body">${detailsHtml}</div>` : ''}
+            </article>
+        `;
+    }).join('');
     
     // Sort indicator for total goals column
     const sortIcon = goalsTableSortState.direction === 'desc' ? '▼' : '▲';
@@ -1079,6 +1263,9 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
                     ${tableRows}
                 </tbody>
             </table>
+        </div>
+        <div class="stats-mobile-cards goals-mobile-cards">
+            ${goalsCards}
         </div>
     `;
 }
@@ -1109,24 +1296,25 @@ let selectedParticipationMonthFilter = ''; // Format: 'YYYY-MM' or '' for all mo
 let selectedParticipationQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for participation statistics), e.g., '2026-Q1'
 let selectedCompletedQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for completed matches), e.g., '2026-Q1'
 
-async function loadMatches() {
-    showLoading();
+async function loadMatches(forceRefresh = false) {
     try {
-        // Ensure players are loaded before rendering matches
-        // because matches need player names for goals display
-        if (players.length === 0) {
-            await loadPlayers();
-        }
-        
-        matches = await matchesAPI.getAll();
-        renderUpcomingMatches();
-        renderCompletedMatches();
-        // Re-render opponents to update head-to-head records
-        if (opponents.length > 0) renderOpponents();
+        await ensurePlayersLoaded({ skipRender: true });
+
+        await refreshResource(
+            'matches',
+            () => matchesAPI.getAll(),
+            (data) => {
+                matches = data;
+                renderUpcomingMatches();
+                renderCompletedMatches();
+                if (opponents.length > 0) {
+                    renderOpponents();
+                }
+            },
+            { forceRefresh, staleData: matches.length > 0 ? matches : null }
+        );
     } catch (error) {
         alert('Error loading matches: ' + error.message);
-    } finally {
-        hideLoading();
     }
 }
 
@@ -2085,8 +2273,9 @@ async function saveMatch(event) {
             };
             await matchesAPI.create(formData);
         }
+        invalidateMatchesCache();
         closeMatchModal();
-        await loadMatches();
+        await loadMatches(true);
     } catch (error) {
         alert('Error saving match: ' + error.message);
     } finally {
@@ -2106,7 +2295,8 @@ async function deleteMatch(id) {
     showLoading();
     try {
         await matchesAPI.delete(id);
-        await loadMatches();
+        invalidateMatchesCache();
+        await loadMatches(true);
         // Update opponents to refresh head-to-head records
         if (opponents.length > 0) renderOpponents();
     } catch (error) {
@@ -2350,8 +2540,9 @@ async function saveMatchResult(event) {
         };
         
         await matchesAPI.updateResult(editingMatchResultId, resultData);
+        invalidateMatchesCache();
         closeMatchResultModal();
-        await loadMatches();
+        await loadMatches(true);
         // Update opponents to refresh head-to-head records
         if (opponents.length > 0) renderOpponents();
     } catch (error) {
@@ -2508,6 +2699,39 @@ function renderParticipationStatistics(completedMatches) {
     // Sort indicator for participation rate column
     const sortIcon = participationTableSortState.direction === 'desc' ? '▼' : '▲';
     const sortStyle = 'cursor: pointer; user-select: none;';
+
+    const participationCards = participationArray.map(playerData => {
+        const rateColor = playerData.participationRate < 50 ? '#dc3545' : '#667eea';
+        const detailRows = allMatchDates.map(date => {
+            const status = playerData.matches[date] !== undefined ? playerData.matches[date] : 0;
+            const dateObj = new Date(date + 'T00:00:00');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const label = status === 1 ? 'Có mặt' : 'Vắng';
+            return `
+                <div class="stats-mobile-row">
+                    <span>${day}/${month}</span>
+                    <strong>${label}</strong>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <article class="stats-mobile-card">
+                <div class="stats-mobile-card-header">
+                    <h4>${escapeHtml(playerData.name)}</h4>
+                    <span class="stats-mobile-total" style="color: ${rateColor};">${playerData.participationRate.toFixed(1)}%</span>
+                </div>
+                <div class="stats-mobile-summary">
+                    <span>V: <strong style="color:#28a745;">${playerData.totalParticipated}</strong></span>
+                    <span>X: <strong style="color:#dc3545;">${playerData.totalNotParticipated}</strong></span>
+                </div>
+                <div class="stats-mobile-card-body">
+                    ${detailRows}
+                </div>
+            </article>
+        `;
+    }).join('');
     
     container.innerHTML = `
         <div class="participation-table-scroll">
@@ -2527,6 +2751,9 @@ function renderParticipationStatistics(completedMatches) {
                     ${tableRows}
                 </tbody>
             </table>
+        </div>
+        <div class="stats-mobile-cards participation-mobile-cards">
+            ${participationCards}
         </div>
     `;
 }
