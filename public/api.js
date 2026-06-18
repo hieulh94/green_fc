@@ -7,13 +7,19 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
 // API Helper Functions
 async function apiRequest(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
+    const timeoutMs = options.timeoutMs ?? 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     const config = {
         headers: {
             'Content-Type': 'application/json',
             ...options.headers,
         },
         ...options,
+        signal: controller.signal,
     };
+    delete config.timeoutMs;
 
     if (config.body && typeof config.body === 'object') {
         config.body = JSON.stringify(config.body);
@@ -21,12 +27,29 @@ async function apiRequest(endpoint, options = {}) {
 
     try {
         const response = await fetch(url, config);
+        clearTimeout(timeoutId);
         
         if (response.status === 204) {
             return null; // No content
         }
 
-        const data = await response.json();
+        // Check content type before parsing JSON
+        const contentType = response.headers.get('content-type');
+        let data;
+        
+        if (contentType && contentType.includes('application/json')) {
+            try {
+                data = await response.json();
+            } catch (jsonError) {
+                // If JSON parsing fails, try to get text
+                const text = await response.text();
+                throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+            }
+        } else {
+            // Not JSON, get text response
+            const text = await response.text();
+            throw new Error(`Server error (${response.status}): ${text.substring(0, 200)}`);
+        }
         
         if (!response.ok) {
             // Handle validation errors (422)
@@ -41,7 +64,11 @@ async function apiRequest(endpoint, options = {}) {
         
         return data;
     } catch (error) {
+        clearTimeout(timeoutId);
         console.error('API request failed:', error);
+        if (error.name === 'AbortError') {
+            throw new Error('Request timed out. Please check your connection and try again.');
+        }
         if (error.message) {
             throw error;
         }

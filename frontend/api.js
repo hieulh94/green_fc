@@ -7,13 +7,19 @@ const API_BASE_URL = window.location.hostname === 'localhost' || window.location
 // API Helper Functions
 async function apiRequest(endpoint, options = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
+    const timeoutMs = options.timeoutMs ?? 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     const config = {
         headers: {
             'Content-Type': 'application/json',
             ...options.headers,
         },
         ...options,
+        signal: controller.signal,
     };
+    delete config.timeoutMs;
 
     if (config.body && typeof config.body === 'object') {
         config.body = JSON.stringify(config.body);
@@ -21,6 +27,7 @@ async function apiRequest(endpoint, options = {}) {
 
     try {
         const response = await fetch(url, config);
+        clearTimeout(timeoutId);
         
         if (response.status === 204) {
             return null; // No content
@@ -57,7 +64,11 @@ async function apiRequest(endpoint, options = {}) {
         
         return data;
     } catch (error) {
+        clearTimeout(timeoutId);
         console.error('API request failed:', error);
+        if (error.name === 'AbortError') {
+            throw new Error('Request timed out. Please check your connection and try again.');
+        }
         if (error.message) {
             throw error;
         }

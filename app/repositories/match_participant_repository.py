@@ -21,6 +21,22 @@ class MatchParticipantRepository:
         docs = self.db.collection(self.collection).where("match_id", "==", match_id).stream()
         return [doc.to_dict()["player_id"] for doc in docs]
 
+    def get_player_ids_by_match_ids(self, match_ids: List[str]) -> dict[str, List[str]]:
+        if not match_ids:
+            return {}
+        grouped: dict[str, List[str]] = {match_id: [] for match_id in match_ids}
+        chunk_size = 10
+        for i in range(0, len(match_ids), chunk_size):
+            chunk = match_ids[i:i + chunk_size]
+            docs = self.db.collection(self.collection).where("match_id", "in", chunk).stream()
+            for doc in docs:
+                data = doc.to_dict()
+                match_id = data.get("match_id")
+                player_id = data.get("player_id")
+                if match_id and player_id:
+                    grouped.setdefault(match_id, []).append(player_id)
+        return grouped
+
     def create(self, match_id: str, player_id: str) -> MatchParticipant:
         # Check if already exists (unique constraint)
         existing = self.db.collection(self.collection).where("match_id", "==", match_id).where("player_id", "==", player_id).limit(1).stream()

@@ -27,6 +27,18 @@ class OpponentRepository:
         data["id"] = doc.id
         return Opponent(**data)
 
+    def get_by_ids(self, opponent_ids: List[str]) -> dict[str, Opponent]:
+        if not opponent_ids:
+            return {}
+        refs = [self.db.collection(self.collection).document(opponent_id) for opponent_id in opponent_ids]
+        opponents: dict[str, Opponent] = {}
+        for doc in self.db.get_all(refs):
+            if doc.exists:
+                data = doc.to_dict()
+                data["id"] = doc.id
+                opponents[doc.id] = Opponent(**data)
+        return opponents
+
     def create(self, opponent: OpponentCreate) -> Opponent:
         data = opponent.model_dump(exclude={"id"})
         # Convert date objects to strings if any

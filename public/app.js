@@ -9,14 +9,24 @@ let editingOpponentId = null;
 let editingMatchId = null;
 let editingMatchResultId = null;
 let statsChart = null;
-let goalsBubbleChart = null; // Bubble chart for goal statistics
+let goalsBubbleChart = null;
+let statsCharts = {
+    goalsByPlayer: null,
+    goalsPerMonth: null,
+    participation: null,
+    topScorersTrend: null
+};
+let statsTimelineView = 'month';
 let openOpponentModalCallback = null; // Callback khi thêm opponent từ match modal
 let isLoggedIn = false; // Login state
-let goalsTableSortState = { column: 'total', direction: 'desc' }; // 'asc' or 'desc'
-let participationTableSortState = { column: 'rate', direction: 'desc' }; // 'asc' or 'desc'
 const CACHE_STORAGE_PREFIX = 'fcgreen_cache_';
 const dataCache = {};
 let playersLoadPromise = null;
+let playerSearchQuery = '';
+let playerPositionFilter = '';
+let playerSortBy = 'participation';
+let opponentSearchQuery = '';
+let opponentSortBy = 'strength';
 
 function getCachedData(cacheKey) {
     if (dataCache[cacheKey]?.data != null) {
@@ -110,6 +120,7 @@ async function ensurePlayersLoaded({ forceRefresh = false, skipRender = false } 
             if (!skipRender) {
                 renderPlayers();
             }
+            updateHeaderStats();
         },
         { forceRefresh }
     ).finally(() => {
@@ -125,6 +136,9 @@ document.addEventListener('DOMContentLoaded', () => {
     checkLoginStatus();
     
     setupTabs();
+    setupPlayerFilters();
+    setupOpponentFilters();
+    setupProfileDropdown();
     loadTeams();
     // Load opponents and matches, then render opponents after both are loaded
     Promise.all([
@@ -135,13 +149,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // Re-render opponents after matches are loaded to show head-to-head records
         if (opponents.length > 0) renderOpponents();
         showUpcomingMatchModal(); // Show upcoming match modal after matches are loaded
+    }).catch((error) => {
+        console.error('Initial data load failed:', error);
+        resetLoading();
     });
+
+    // Safety net: never leave the loading overlay stuck if an API hangs
+    setTimeout(resetLoading, 20000);
     setupTabChangeListeners();
     
-    // Add click listener to header title
-    const headerTitle = document.querySelector('.header-title');
-    if (headerTitle) {
-        headerTitle.addEventListener('click', () => {
+    // Add click listener to header brand
+    const headerBrand = document.querySelector('.header-brand');
+    if (headerBrand) {
+        headerBrand.addEventListener('click', () => {
             showUpcomingMatchModal();
         });
     }
@@ -156,15 +176,223 @@ function setupTabs() {
         button.addEventListener('click', () => {
             const tabName = button.getAttribute('data-tab');
             
-            // Update buttons
-            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabButtons.forEach(btn => {
+                btn.classList.remove('active');
+                btn.setAttribute('aria-selected', 'false');
+            });
             button.classList.add('active');
+            button.setAttribute('aria-selected', 'true');
             
-            // Update content
             tabContents.forEach(content => content.classList.remove('active'));
             document.getElementById(`${tabName}-tab`).classList.add('active');
         });
     });
+}
+
+function setupPlayerFilters() {
+    const searchInput = document.getElementById('player-search');
+    const positionFilter = document.getElementById('player-position-filter');
+    const sortSelect = document.getElementById('player-sort');
+
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            playerSearchQuery = e.target.value.toLowerCase().trim();
+            renderPlayers();
+        });
+    }
+    if (positionFilter) {
+        positionFilter.addEventListener('change', (e) => {
+            playerPositionFilter = e.target.value;
+            renderPlayers();
+        });
+    }
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+            playerSortBy = e.target.value;
+            renderPlayers();
+        });
+    }
+}
+
+function setupProfileDropdown() {
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('profile-dropdown');
+        const menuBtn = document.getElementById('profile-menu-btn');
+        if (dropdown && !dropdown.contains(e.target) && !menuBtn?.contains(e.target)) {
+            closeProfileDropdown();
+        }
+        if (!e.target.closest('.player-card-menu') && !e.target.closest('.opponent-card-menu')) {
+            closeAllPlayerMenus();
+            closeAllOpponentMenus();
+        }
+    });
+}
+
+function toggleProfileDropdown(event) {
+    event.stopPropagation();
+    const dropdown = document.getElementById('profile-dropdown');
+    const btn = document.getElementById('profile-menu-btn');
+    if (!dropdown) return;
+    const isOpen = dropdown.classList.toggle('open');
+    btn?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+
+function closeProfileDropdown() {
+    const dropdown = document.getElementById('profile-dropdown');
+    const btn = document.getElementById('profile-menu-btn');
+    dropdown?.classList.remove('open');
+    btn?.setAttribute('aria-expanded', 'false');
+}
+
+function togglePlayerMenu(playerId, event) {
+    event.stopPropagation();
+    const menu = document.getElementById(`player-menu-${playerId}`);
+    if (!menu) return;
+    const isOpen = menu.classList.contains('open');
+    closeAllPlayerMenus();
+    if (!isOpen) menu.classList.add('open');
+}
+
+function closeAllPlayerMenus() {
+    document.querySelectorAll('.menu-dropdown.open').forEach(menu => menu.classList.remove('open'));
+}
+
+function updateHeaderStats() {
+    const statPlayers = document.getElementById('stat-players');
+    const statGoals = document.getElementById('stat-goals');
+    const statMatches = document.getElementById('stat-matches');
+    const statRanking = document.getElementById('stat-ranking');
+    const teamCountry = document.getElementById('header-team-country');
+
+    if (statPlayers) statPlayers.textContent = players.length;
+    if (statGoals) statGoals.textContent = players.reduce((sum, p) => sum + (p.total_goals || 0), 0);
+
+    const completedMatches = matches.filter(m => m.is_completed === true || m.is_completed === 1);
+    if (statMatches) statMatches.textContent = completedMatches.length;
+
+    let wins = 0, draws = 0;
+    completedMatches.forEach(m => {
+        if (m.result === 'win') wins++;
+        else if (m.result === 'draw') draws++;
+    });
+    const points = wins * 3 + draws;
+    if (statRanking) statRanking.textContent = completedMatches.length > 0 ? points : '—';
+
+    if (teamCountry && teams.length > 0) {
+        teamCountry.textContent = teams[0].country || 'Football Club';
+    }
+}
+
+function getFilteredSortedPlayers() {
+    let filtered = [...players];
+
+    if (playerSearchQuery) {
+        filtered = filtered.filter(p => p.name.toLowerCase().includes(playerSearchQuery));
+    }
+    if (playerPositionFilter) {
+        filtered = filtered.filter(p => {
+            const positions = Array.isArray(p.position) ? p.position : [p.position];
+            return positions.filter(Boolean).includes(playerPositionFilter);
+        });
+    }
+
+    filtered.sort((a, b) => {
+        if (playerSortBy === 'participation') {
+            const diff = getPlayerMatchCount(b.id) - getPlayerMatchCount(a.id);
+            return diff !== 0 ? diff : a.name.localeCompare(b.name, 'vi');
+        }
+        if (playerSortBy === 'goals') return (b.total_goals || 0) - (a.total_goals || 0);
+        if (playerSortBy === 'jersey') return (a.jersey_number || 999) - (b.jersey_number || 999);
+        return a.name.localeCompare(b.name, 'vi');
+    });
+
+    return filtered;
+}
+
+function getPlayerMatchCount(playerId) {
+    return matches.filter(m =>
+        (m.is_completed === true || m.is_completed === 1) &&
+        (m.participant_ids || []).includes(playerId)
+    ).length;
+}
+
+function getPlayerInitials(name) {
+    return name.split(' ').filter(Boolean).map(n => n[0]).slice(0, 2).join('').toUpperCase();
+}
+
+function getRoleBadgeClass(role) {
+    if (role === 'Đội trưởng') return 'role-captain';
+    if (role === 'Đội phó') return 'role-vice';
+    return 'role-player';
+}
+
+function getRoleLabel(role) {
+    if (role === 'Đội trưởng') return 'Captain';
+    if (role === 'Đội phó') return 'Vice Captain';
+    return 'Player';
+}
+
+function getRoleBadgeIcon(role) {
+    if (role === 'Đội trưởng') return '⭐';
+    if (role === 'Đội phó') return '🛡';
+    return '';
+}
+
+function getPositionColorClass(position) {
+    const gk = ['GK'];
+    const cb = ['CB'];
+    const fb = ['LB', 'RB', 'FB'];
+    const mid = ['CM', 'CAM', 'CDM', 'LM', 'RM', 'LW', 'RW', 'DM', 'AM', 'W'];
+    const st = ['ST', 'CF', 'SS'];
+    if (gk.includes(position)) return 'pos-gk';
+    if (cb.includes(position)) return 'pos-cb';
+    if (fb.includes(position)) return 'pos-fb';
+    if (mid.includes(position)) return 'pos-mid';
+    if (st.includes(position)) return 'pos-st';
+    return 'pos-default';
+}
+
+function getTopScorerIds() {
+    if (players.length === 0) return new Set();
+    const maxGoals = Math.max(...players.map(p => p.total_goals || 0));
+    if (maxGoals <= 0) return new Set();
+    return new Set(
+        players.filter(p => (p.total_goals || 0) === maxGoals).map(p => p.id)
+    );
+}
+
+function updatePlayerResultCount(count) {
+    const el = document.getElementById('players-result-count');
+    if (!el) return;
+    const total = players.length;
+    if (total === 0) {
+        el.textContent = '';
+        return;
+    }
+    if (count === total && !playerSearchQuery && !playerPositionFilter) {
+        el.innerHTML = `<strong>${count}</strong> cầu thủ`;
+    } else {
+        el.innerHTML = `Tìm thấy <strong>${count}</strong> / ${total} cầu thủ`;
+    }
+}
+
+function viewPlayerProfile(playerId) {
+    editPlayer(playerId);
+}
+
+function viewPlayerStatistics() {
+    const statsTab = document.querySelector('.tab-btn[data-tab="statistics"]');
+    if (statsTab) statsTab.click();
+    closeAllPlayerMenus();
+}
+
+function getPlayerImageUrl(player) {
+    if (!player.profile_image) return '';
+    if (player.profile_image.startsWith('http')) return player.profile_image;
+    if (player.profile_image.startsWith('/')) return `${window.location.origin}${player.profile_image}`;
+    return API_BASE_URL.startsWith('http')
+        ? `${API_BASE_URL}${player.profile_image}`
+        : `${window.location.origin}${API_BASE_URL}${player.profile_image}`;
 }
 
 // Loading indicator (refcount avoids stuck overlay when multiple requests overlap)
@@ -184,6 +412,12 @@ function hideLoading() {
     }
 }
 
+function resetLoading() {
+    loadingCount = 0;
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.style.display = 'none';
+}
+
 /** String id an toàn cho onclick="fn('…')" (ID Firestore là chuỗi, không được dùng như tên biến). */
 function escapeForOnclickArg(value) {
     return String(value ?? '')
@@ -198,6 +432,7 @@ async function loadTeams() {
         teams = await teamsAPI.getAll();
         renderTeamProfileDisplay();
         updateTeamSelects();
+        updateHeaderStats();
     } catch (error) {
         alert('Error loading teams: ' + error.message);
     } finally {
@@ -276,10 +511,14 @@ function openTeamProfile(teamId) {
     `;
     
     sidebar.classList.add('active');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (backdrop) backdrop.classList.add('active');
 }
 
 function closeTeamProfile() {
     document.getElementById('team-profile-sidebar').classList.remove('active');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (backdrop) backdrop.classList.remove('active');
 }
 
 async function saveTeamProfile(event, teamId) {
@@ -314,6 +553,7 @@ async function loadPlayers(forceRefresh = false) {
             (data) => {
                 players = data;
                 renderPlayers();
+                updateHeaderStats();
             },
             { forceRefresh }
         );
@@ -324,48 +564,130 @@ async function loadPlayers(forceRefresh = false) {
 
 function renderPlayers() {
     const container = document.getElementById('players-list');
-    
+    if (!container) return;
+
+    updateHeaderStats();
+    const filteredPlayers = getFilteredSortedPlayers();
+    const topScorerIds = getTopScorerIds();
+
     if (players.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>No players found</h3><p>Click "Add Player" to create your first player</p></div>';
+        updatePlayerResultCount(0);
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>Chưa có cầu thủ</h3>
+                <p>Thêm cầu thủ đầu tiên cho đội bóng của bạn</p>
+            </div>`;
         return;
     }
-    
-    container.innerHTML = players.map(player => {
+
+    if (filteredPlayers.length === 0) {
+        updatePlayerResultCount(0);
+        container.innerHTML = `
+            <div class="empty-state">
+                <h3>Không tìm thấy cầu thủ</h3>
+                <p>Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm</p>
+            </div>`;
+        return;
+    }
+
+    updatePlayerResultCount(filteredPlayers.length);
+
+    container.innerHTML = filteredPlayers.map(player => {
         const positions = Array.isArray(player.position) ? player.position : [player.position];
-        const positionsText = positions.join(', ');
-        let imageUrl = '';
-        if (player.profile_image) {
-            if (player.profile_image.startsWith('http')) {
-                imageUrl = player.profile_image;
-            } else if (player.profile_image.startsWith('/')) {
-                // Absolute path - use current origin
-                imageUrl = `${window.location.origin}${player.profile_image}`;
-            } else {
-                // Relative path - use API base URL
-                imageUrl = API_BASE_URL.startsWith('http') 
-                    ? `${API_BASE_URL}${player.profile_image}`
-                    : `${window.location.origin}${API_BASE_URL}${player.profile_image}`;
-            }
-        }
-        
-        const hasImage = !!imageUrl;
-        const cardClass = hasImage ? 'card card-with-image' : 'card';
-        
+        const positionsFiltered = positions.filter(Boolean);
+        const imageUrl = getPlayerImageUrl(player);
         const role = player.role || 'Cầu thủ';
         const totalGoals = player.total_goals !== undefined ? player.total_goals : 0;
-        
+        const matchCount = getPlayerMatchCount(player.id);
+        const roleClass = getRoleBadgeClass(role);
+        const roleLabel = getRoleLabel(role);
+        const roleIcon = getRoleBadgeIcon(role);
+        const initials = getPlayerInitials(player.name);
+        const safeId = escapeForOnclickArg(player.id);
+        const isTopScorer = topScorerIds.has(player.id);
+        const cardClasses = ['player-card', isTopScorer ? 'player-card-top-scorer' : ''].filter(Boolean).join(' ');
+
+        const avatarHtml = imageUrl
+            ? `<div class="player-avatar-wrap">
+                <div class="player-avatar-placeholder" style="display:none">${initials}</div>
+                <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(player.name)}" class="player-avatar" onerror="this.style.display='none';this.previousElementSibling.style.display='flex'">
+               </div>`
+            : `<div class="player-avatar-placeholder">${initials}</div>`;
+
+        const highlightBadges = [];
+        if (isTopScorer) highlightBadges.push('<span class="highlight-badge highlight-badge-top-scorer">🏆 Top Scorer</span>');
+
+        const roleBadgeHtml = role !== 'Cầu thủ'
+            ? `<span class="role-badge ${roleClass}">${roleIcon ? roleIcon + ' ' : ''}${escapeHtml(roleLabel)}</span>`
+            : `<span class="role-badge ${roleClass}">${escapeHtml(roleLabel)}</span>`;
+
+        const menuHtml = `
+            <div class="player-card-menu">
+                <button type="button" class="menu-trigger" onclick="togglePlayerMenu('${safeId}', event)" aria-label="Tùy chọn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                </button>
+                <div class="menu-dropdown" id="player-menu-${player.id}">
+                    <button type="button" class="menu-dropdown-item" onclick="viewPlayerProfile('${safeId}'); closeAllPlayerMenus();">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        Xem hồ sơ
+                    </button>
+                    ${isLoggedIn ? `
+                    <button type="button" class="menu-dropdown-item" onclick="editPlayer('${safeId}'); closeAllPlayerMenus();">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Chỉnh sửa
+                    </button>` : ''}
+                    <button type="button" class="menu-dropdown-item" onclick="viewPlayerStatistics(); closeAllPlayerMenus();">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                        Thống kê
+                    </button>
+                    ${isLoggedIn ? `
+                    <div class="menu-dropdown-divider"></div>
+                    <button type="button" class="menu-dropdown-item menu-dropdown-item-danger" onclick="deletePlayer('${safeId}'); closeAllPlayerMenus();">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        Xóa
+                    </button>` : ''}
+                </div>
+            </div>`;
+
         return `
-            <div class="${cardClass}">
-                ${hasImage ? `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(player.name)}" class="card-profile-image" onerror="this.style.display='none'">` : ''}
-                <div class="card-info">
-                    <h3>${escapeHtml(player.name)} <span style="font-size: 0.8em; color: #667eea; font-weight: normal;">(${escapeHtml(role)})</span></h3>
-                    <p><strong>Position(s):</strong> ${escapeHtml(positionsText)}</p>
-                    ${player.jersey_number ? `<p><strong>Jersey #:</strong> ${player.jersey_number}</p>` : ''}
-                    <p><strong>Tổng số bàn thắng:</strong> <span style="color: #28a745; font-weight: bold;">${totalGoals}</span></p>
-                    <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                        <button class="btn btn-primary btn-small" onclick="editPlayer('${escapeForOnclickArg(player.id)}')">Edit</button>
-                        <button class="btn btn-danger btn-small" onclick="deletePlayer('${escapeForOnclickArg(player.id)}')">Delete</button>
+            <div class="${cardClasses}">
+                <div class="player-card-header">
+                    ${avatarHtml}
+                    <div class="player-card-header-info">
+                        <div class="player-name-row">
+                            <span class="player-name" title="${escapeHtml(player.name)}">${escapeHtml(player.name)}</span>
+                            ${player.jersey_number ? `<span class="jersey-badge">${player.jersey_number}</span>` : ''}
+                        </div>
+                        <div class="player-badges-row">
+                            ${roleBadgeHtml}
+                            ${highlightBadges.join('')}
+                        </div>
                     </div>
+                    ${menuHtml}
+                </div>
+                <div class="goals-highlight" aria-label="${totalGoals} bàn thắng">
+                    <span class="goals-icon" aria-hidden="true">⚽</span>
+                    <span class="goals-value">${totalGoals}</span>
+                    <span class="goals-label">Goals</span>
+                </div>
+                ${positionsFiltered.length > 0 ? `
+                    <div class="position-tags">
+                        ${positionsFiltered.map(pos => `<span class="position-tag ${getPositionColorClass(pos)}">${escapeHtml(pos)}</span>`).join('')}
+                    </div>` : ''}
+                <div class="player-card-footer">
+                    <span class="footer-stat">
+                        <span class="footer-stat-icon" aria-hidden="true">🎮</span>
+                        <span class="footer-stat-value">${matchCount}</span> Matches
+                    </span>
+                    <span class="footer-stat">
+                        <span class="footer-stat-icon" aria-hidden="true">📍</span>
+                        <span class="footer-stat-value">${positionsFiltered.length || 0}</span> Positions
+                    </span>
+                    ${player.jersey_number ? `
+                    <span class="footer-stat">
+                        <span class="footer-stat-icon" aria-hidden="true">👕</span>
+                        #<span class="footer-stat-value">${player.jersey_number}</span>
+                    </span>` : ''}
                 </div>
             </div>
         `;
@@ -589,6 +911,254 @@ function setupTabChangeListeners() {
 }
 
 // Opponents functions
+const OPPONENT_AVATAR_COLORS = [
+    { bg: '#EEF2FF', text: '#4F46E5', border: '#C7D2FE' },
+    { bg: '#DBEAFE', text: '#2563EB', border: '#93C5FD' },
+    { bg: '#CFFAFE', text: '#0891B2', border: '#67E8F9' },
+    { bg: '#D1FAE5', text: '#059669', border: '#6EE7B7' },
+    { bg: '#FFEDD5', text: '#EA580C', border: '#FDBA74' },
+    { bg: '#FEE2E2', text: '#DC2626', border: '#FCA5A5' },
+    { bg: '#F3E8FF', text: '#7C3AED', border: '#C4B5FD' },
+    { bg: '#FCE7F3', text: '#DB2777', border: '#F9A8D4' },
+];
+
+function setupOpponentFilters() {
+    const searchInput = document.getElementById('opponent-search');
+    const sortSelect = document.getElementById('opponent-sort');
+
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            opponentSearchQuery = e.target.value.toLowerCase().trim();
+            renderOpponents();
+        });
+    }
+    if (sortSelect) {
+        sortSelect.addEventListener('change', (e) => {
+            opponentSortBy = e.target.value;
+            renderOpponents();
+        });
+    }
+}
+
+function ratingToStrength(rating) {
+    return Math.min(100, Math.max(0, (rating || 0) * 20));
+}
+
+function strengthToRating(strength) {
+    return Math.min(5, Math.max(0, Math.round(Number(strength) / 20)));
+}
+
+function getOpponentAvatarColors(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return OPPONENT_AVATAR_COLORS[Math.abs(hash) % OPPONENT_AVATAR_COLORS.length];
+}
+
+function getStrengthTier(strength) {
+    if (strength >= 80) return 'high';
+    if (strength >= 60) return 'mid';
+    if (strength >= 40) return 'low';
+    return 'minimal';
+}
+
+function getOpponentMatchStats(opponentId) {
+    const opponentMatches = matches
+        .filter(m => m.opponent_id === opponentId && (m.is_completed === true || m.is_completed === 1))
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+    opponentMatches.forEach(m => {
+        if (m.result === 'win') wins++;
+        else if (m.result === 'draw') draws++;
+        else if (m.result === 'lose') losses++;
+    });
+
+    return {
+        total: opponentMatches.length,
+        wins,
+        draws,
+        losses,
+        winRate: opponentMatches.length > 0 ? Math.round((wins / opponentMatches.length) * 100) : null,
+        recentResults: opponentMatches.slice(0, 8).reverse(),
+        neverDefeated: opponentMatches.length > 0 && wins === 0,
+        lastMatch: opponentMatches[0] || null,
+    };
+}
+
+function getRivalOpponentIds() {
+    const counts = opponents
+        .map(o => ({ id: o.id, count: getOpponentMatchStats(o.id).total }))
+        .filter(x => x.count >= 3)
+        .sort((a, b) => b.count - a.count);
+    return new Set(counts.slice(0, 3).map(x => x.id));
+}
+
+function getOpponentsSummary() {
+    const completedVsOpponents = matches.filter(
+        m => (m.is_completed === true || m.is_completed === 1) && m.opponent_id
+    );
+    const totalWins = completedVsOpponents.filter(m => m.result === 'win').length;
+    const winRate = completedVsOpponents.length > 0
+        ? Math.round((totalWins / completedVsOpponents.length) * 100)
+        : null;
+
+    let strongestOpponent = null;
+    let maxStrength = -1;
+    opponents.forEach(o => {
+        const strength = ratingToStrength(o.rating);
+        if (strength > maxStrength) {
+            maxStrength = strength;
+            strongestOpponent = o;
+        }
+    });
+
+    return {
+        totalOpponents: opponents.length,
+        winRate,
+        strongestOpponent,
+        notPlayedCount: opponents.filter(o => getOpponentMatchStats(o.id).total === 0).length,
+    };
+}
+
+function getFilteredSortedOpponents() {
+    let filtered = [...opponents];
+
+    if (opponentSearchQuery) {
+        filtered = filtered.filter(o =>
+            o.name.toLowerCase().includes(opponentSearchQuery) ||
+            (o.review && o.review.toLowerCase().includes(opponentSearchQuery))
+        );
+    }
+
+    filtered.sort((a, b) => {
+        const statsA = getOpponentMatchStats(a.id);
+        const statsB = getOpponentMatchStats(b.id);
+
+        if (opponentSortBy === 'name') {
+            return a.name.localeCompare(b.name, 'vi');
+        }
+        if (opponentSortBy === 'played') {
+            const diff = statsB.total - statsA.total;
+            return diff !== 0 ? diff : a.name.localeCompare(b.name, 'vi');
+        }
+        if (opponentSortBy === 'winrate') {
+            const rateA = statsA.winRate ?? -1;
+            const rateB = statsB.winRate ?? -1;
+            const diff = rateB - rateA;
+            return diff !== 0 ? diff : a.name.localeCompare(b.name, 'vi');
+        }
+        if (opponentSortBy === 'recent') {
+            const dateA = statsA.lastMatch ? new Date(statsA.lastMatch.date).getTime() : 0;
+            const dateB = statsB.lastMatch ? new Date(statsB.lastMatch.date).getTime() : 0;
+            const diff = dateB - dateA;
+            return diff !== 0 ? diff : a.name.localeCompare(b.name, 'vi');
+        }
+        const strengthDiff = ratingToStrength(b.rating) - ratingToStrength(a.rating);
+        return strengthDiff !== 0 ? strengthDiff : a.name.localeCompare(b.name, 'vi');
+    });
+
+    return filtered;
+}
+
+function updateOpponentResultCount(count) {
+    const el = document.getElementById('opponents-result-count');
+    if (!el) return;
+    if (opponents.length === 0) {
+        el.textContent = '';
+        return;
+    }
+    el.innerHTML = `Hiển thị <strong>${count}</strong> / ${opponents.length} đối thủ`;
+}
+
+function renderOpponentsSummary() {
+    const container = document.getElementById('opponents-summary');
+    if (!container) return;
+
+    const summary = getOpponentsSummary();
+    const strongestName = summary.strongestOpponent
+        ? escapeHtml(summary.strongestOpponent.name)
+        : '—';
+    const strongestStrength = summary.strongestOpponent
+        ? ratingToStrength(summary.strongestOpponent.rating)
+        : null;
+
+    container.innerHTML = `
+        <div class="opponents-summary-card">
+            <span class="opponents-summary-icon" aria-hidden="true">🛡</span>
+            <div class="opponents-summary-body">
+                <span class="opponents-summary-value">${summary.totalOpponents}</span>
+                <span class="opponents-summary-label">Tổng đối thủ</span>
+            </div>
+        </div>
+        <div class="opponents-summary-card">
+            <span class="opponents-summary-icon" aria-hidden="true">📈</span>
+            <div class="opponents-summary-body">
+                <span class="opponents-summary-value ${summary.winRate !== null && summary.winRate >= 50 ? 'summary-success' : ''}">${summary.winRate !== null ? summary.winRate + '%' : '—'}</span>
+                <span class="opponents-summary-label">Tỷ lệ thắng</span>
+            </div>
+        </div>
+        <div class="opponents-summary-card opponents-summary-card-highlight">
+            <span class="opponents-summary-icon" aria-hidden="true">⚡</span>
+            <div class="opponents-summary-body">
+                <span class="opponents-summary-value summary-danger">${strongestName}</span>
+                <span class="opponents-summary-label">Đối thủ mạnh nhất${strongestStrength !== null ? ` · STR ${strongestStrength}` : ''}</span>
+            </div>
+        </div>
+        <div class="opponents-summary-card">
+            <span class="opponents-summary-icon" aria-hidden="true">🆕</span>
+            <div class="opponents-summary-body">
+                <span class="opponents-summary-value">${summary.notPlayedCount}</span>
+                <span class="opponents-summary-label">Chưa từng đấu</span>
+            </div>
+        </div>`;
+}
+
+function renderFormChips(recentResults) {
+    if (!recentResults.length) {
+        return '<span class="form-chips-empty">Chưa đấu</span>';
+    }
+    return `<div class="form-chips" aria-label="Phong độ đối đầu gần đây">${recentResults.map(m => {
+        const cls = m.result === 'win' ? 'form-chip-win' : m.result === 'draw' ? 'form-chip-draw' : 'form-chip-loss';
+        const letter = m.result === 'win' ? 'W' : m.result === 'draw' ? 'D' : 'L';
+        const score = `${m.our_score ?? 0}-${m.opponent_score ?? 0}`;
+        const date = m.date ? new Date(m.date).toLocaleDateString('vi-VN') : '';
+        return `<span class="form-chip ${cls}" title="${date}: ${score}">${letter}</span>`;
+    }).join('')}</div>`;
+}
+
+function getOpponentBadges(opponent, stats, rivalIds) {
+    const badges = [];
+    const strength = ratingToStrength(opponent.rating);
+    if (strength >= 80) {
+        badges.push({ label: 'Strong Opponent', class: 'opponent-badge-strong' });
+    }
+    if (rivalIds.has(opponent.id)) {
+        badges.push({ label: 'Rival', class: 'opponent-badge-rival' });
+    }
+    if (stats.neverDefeated) {
+        badges.push({ label: 'Never Defeated', class: 'opponent-badge-undefeated' });
+    }
+    return badges;
+}
+
+function toggleOpponentMenu(opponentId, event) {
+    event.stopPropagation();
+    const menu = document.getElementById(`opponent-menu-${opponentId}`);
+    if (!menu) return;
+    const isOpen = menu.classList.contains('open');
+    closeAllOpponentMenus();
+    closeAllPlayerMenus();
+    if (!isOpen) menu.classList.add('open');
+}
+
+function closeAllOpponentMenus() {
+    document.querySelectorAll('.opponent-card-menu .menu-dropdown.open').forEach(menu => menu.classList.remove('open'));
+}
+
 async function loadOpponents(forceRefresh = false) {
     try {
         await refreshResource(
@@ -606,75 +1176,118 @@ async function loadOpponents(forceRefresh = false) {
     }
 }
 
-function getOpponentHeadToHead(opponentId) {
-    // Get completed matches for this opponent, sorted by date
-    const opponentMatches = matches
-        .filter(match => match.opponent_id === opponentId && match.is_completed === true)
-        .sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    if (opponentMatches.length === 0) {
-        return null;
-    }
-    
-    // Map result to Vietnamese with colors
-    const resultMap = {
-        'win': { text: 'Thắng', color: '#28a745' }, // Green
-        'lose': { text: 'Thua', color: '#dc3545' }, // Red
-        'draw': { text: 'Hòa', color: '#ffc107' }   // Yellow
-    };
-    
-    // Create head-to-head HTML with colors: "Thắng - Thua - Thắng ..."
-    const headToHead = opponentMatches
-        .map(match => {
-            const result = resultMap[match.result] || { text: match.result, color: '#666' };
-            return `<span style="color: ${result.color}; font-weight: bold;">${result.text}</span>`;
-        })
-        .join(' - ');
-    
-    return headToHead;
-}
-
 function renderOpponents() {
     const container = document.getElementById('opponents-list');
-    
+    if (!container) return;
+
+    renderOpponentsSummary();
+
     if (opponents.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>No opponents found</h3><p>Click "Thêm đối thủ" to create your first opponent</p></div>';
+        updateOpponentResultCount(0);
+        container.innerHTML = `
+            <div class="empty-state opponents-empty-state">
+                <div class="empty-state-icon" aria-hidden="true">🛡</div>
+                <h3>Chưa có đối thủ</h3>
+                <p>Thêm đối thủ đầu tiên để theo dõi phân tích đối đầu</p>
+            </div>`;
         return;
     }
-    
-    container.innerHTML = opponents.map(opponent => {
-        const rating = opponent.rating || 0;
+
+    const filteredOpponents = getFilteredSortedOpponents();
+    const rivalIds = getRivalOpponentIds();
+
+    if (filteredOpponents.length === 0) {
+        updateOpponentResultCount(0);
+        container.innerHTML = `
+            <div class="empty-state opponents-empty-state">
+                <h3>Không tìm thấy đối thủ</h3>
+                <p>Thử thay đổi từ khóa tìm kiếm hoặc bộ lọc sắp xếp</p>
+            </div>`;
+        return;
+    }
+
+    updateOpponentResultCount(filteredOpponents.length);
+
+    container.innerHTML = filteredOpponents.map(opponent => {
+        const strength = ratingToStrength(opponent.rating);
+        const strengthTier = getStrengthTier(strength);
+        const stats = getOpponentMatchStats(opponent.id);
+        const badges = getOpponentBadges(opponent, stats, rivalIds);
+        const avatarColors = getOpponentAvatarColors(opponent.name);
+        const initials = getPlayerInitials(opponent.name);
+        const safeId = escapeForOnclickArg(opponent.id);
         const review = opponent.review || '';
-        
-        // Generate star display
-        let starsHtml = '';
-        for (let i = 1; i <= 5; i++) {
-            if (i <= rating) {
-                starsHtml += '<span style="color: #ffc107; font-size: 1.2em;">★</span>';
-            } else {
-                starsHtml += '<span style="color: #ddd; font-size: 1.2em;">★</span>';
-            }
+
+        const cardClasses = ['opponent-card'];
+        if (badges.some(b => b.class === 'opponent-badge-strong' || b.class === 'opponent-badge-undefeated')) {
+            cardClasses.push('opponent-card-danger');
         }
-        
-        // Get head-to-head record
-        const headToHead = getOpponentHeadToHead(opponent.id);
-        
+        if (badges.some(b => b.class === 'opponent-badge-rival')) {
+            cardClasses.push('opponent-card-rival');
+        }
+        if (stats.total === 0) {
+            cardClasses.push('opponent-card-unplayed');
+        }
+
+        const recordHtml = stats.total > 0
+            ? `<span class="opponent-record-stat record-win">${stats.wins}W</span>
+               <span class="opponent-record-stat record-draw">${stats.draws}D</span>
+               <span class="opponent-record-stat record-loss">${stats.losses}L</span>
+               ${stats.winRate !== null ? `<span class="opponent-record-rate">${stats.winRate}% win</span>` : ''}`
+            : '<span class="opponent-record-none">Chưa có trận đấu</span>';
+
+        const lastScoreHtml = stats.lastMatch
+            ? `<span class="opponent-last-score">${stats.lastMatch.our_score ?? 0}–${stats.lastMatch.opponent_score ?? 0}</span>`
+            : '';
+
+        const menuHtml = isLoggedIn ? `
+            <div class="opponent-card-menu player-card-menu">
+                <button type="button" class="menu-trigger" onclick="toggleOpponentMenu('${safeId}', event)" aria-label="Tùy chọn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                </button>
+                <div class="menu-dropdown" id="opponent-menu-${opponent.id}">
+                    <button type="button" class="menu-dropdown-item" onclick="editOpponent('${safeId}'); closeAllOpponentMenus();">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        Chỉnh sửa
+                    </button>
+                    <div class="menu-dropdown-divider"></div>
+                    <button type="button" class="menu-dropdown-item menu-dropdown-item-danger" onclick="deleteOpponent('${safeId}'); closeAllOpponentMenus();">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        Xóa
+                    </button>
+                </div>
+            </div>` : '';
+
         return `
-        <div class="card">
-            <h3>${escapeHtml(opponent.name)}</h3>
-            ${opponent.phone ? `<p><strong>Số điện thoại:</strong> ${escapeHtml(opponent.phone)}</p>` : ''}
-            <div style="margin: 10px 0;">
-                <strong>Đánh giá:</strong>
-                <div style="margin-top: 5px;">${starsHtml}</div>
-            </div>
-            ${review ? `<div style="margin: 10px 0;"><strong>Nhận xét:</strong><p style="margin-top: 5px; color: #666; font-style: italic;">${escapeHtml(review)}</p></div>` : ''}
-            ${headToHead ? `<div style="margin: 10px 0;"><strong>Thành tích đối đầu:</strong><p style="margin-top: 5px;">${headToHead}</p></div>` : ''}
-            <div class="card-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                <button class="btn btn-primary btn-small" onclick="editOpponent('${escapeForOnclickArg(opponent.id)}')">Sửa</button>
-                <button class="btn btn-danger btn-small" onclick="deleteOpponent('${escapeForOnclickArg(opponent.id)}')">Xóa</button>
-            </div>
-        </div>
-    `;
+            <article class="${cardClasses.join(' ')}">
+                <div class="opponent-card-top">
+                    <div class="opponent-avatar" style="background:${avatarColors.bg};color:${avatarColors.text};border-color:${avatarColors.border}" aria-hidden="true">${initials}</div>
+                    <div class="opponent-card-header-info">
+                        <div class="opponent-name-row">
+                            <h3 class="opponent-name" title="${escapeHtml(opponent.name)}">${escapeHtml(opponent.name)}</h3>
+                            ${menuHtml}
+                        </div>
+                        ${badges.length ? `<div class="opponent-badges-row">${badges.map(b => `<span class="opponent-badge ${b.class}">${b.label}</span>`).join('')}</div>` : ''}
+                        ${opponent.phone ? `<span class="opponent-phone">${escapeHtml(opponent.phone)}</span>` : ''}
+                    </div>
+                    <div class="opponent-strength opponent-strength-${strengthTier}" aria-label="Sức mạnh ${strength}">
+                        <span class="opponent-strength-value">${strength}</span>
+                        <span class="opponent-strength-label">STR</span>
+                    </div>
+                </div>
+                <div class="opponent-card-body">
+                    <div class="opponent-record-row">
+                        <span class="opponent-record-label">Đối đầu</span>
+                        <div class="opponent-record-stats">${recordHtml}</div>
+                    </div>
+                    <div class="opponent-form-row">
+                        <span class="opponent-form-label">Phong độ</span>
+                        <div class="opponent-form-chips">${renderFormChips(stats.recentResults)}</div>
+                        ${lastScoreHtml}
+                    </div>
+                    ${review ? `<p class="opponent-review" title="${escapeHtml(review)}">${escapeHtml(review)}</p>` : ''}
+                </div>
+            </article>`;
     }).join('');
 }
 
@@ -690,15 +1303,18 @@ function openOpponentModal(opponentId = null) {
         document.getElementById('opponent-id').value = opponent.id;
         document.getElementById('opponent-name').value = opponent.name;
         document.getElementById('opponent-phone').value = opponent.phone || '';
+        const strength = ratingToStrength(opponent.rating || 0);
+        document.getElementById('opponent-strength').value = strength;
         document.getElementById('opponent-rating').value = opponent.rating || 0;
         document.getElementById('opponent-review').value = opponent.review || '';
-        updateStarDisplay(opponent.rating || 0);
+        updateStrengthDisplay(strength);
     } else {
         title.textContent = 'Thêm đối thủ';
         form.reset();
         document.getElementById('opponent-id').value = '';
+        document.getElementById('opponent-strength').value = 0;
         document.getElementById('opponent-rating').value = 0;
-        updateStarDisplay(0);
+        updateStrengthDisplay(0);
     }
     
     modal.classList.add('active');
@@ -709,23 +1325,23 @@ function closeOpponentModal() {
     document.getElementById('opponent-form').reset();
     editingOpponentId = null;
     openOpponentModalCallback = null;
-    updateStarDisplay(0);
+    updateStrengthDisplay(0);
 }
 
-function setRating(rating) {
-    document.getElementById('opponent-rating').value = rating;
-    updateStarDisplay(rating);
-}
+function updateStrengthDisplay(strength) {
+    const value = Math.min(100, Math.max(0, Number(strength) || 0));
+    const display = document.getElementById('opponent-strength-display');
+    const ratingInput = document.getElementById('opponent-rating');
+    const slider = document.getElementById('opponent-strength');
+    if (display) display.textContent = value;
+    if (ratingInput) ratingInput.value = strengthToRating(value);
+    if (slider && Number(slider.value) !== value) slider.value = value;
 
-function updateStarDisplay(rating) {
-    const stars = document.querySelectorAll('.star-rating .star');
-    stars.forEach((star, index) => {
-        if (index < rating) {
-            star.style.color = '#ffc107';
-        } else {
-            star.style.color = '#ddd';
-        }
-    });
+    const preview = display?.closest('.strength-preview');
+    if (preview) {
+        preview.classList.remove('strength-tier-high', 'strength-tier-mid', 'strength-tier-low', 'strength-tier-minimal');
+        preview.classList.add(`strength-tier-${getStrengthTier(value)}`);
+    }
 }
 
 async function saveOpponent(event) {
@@ -735,7 +1351,7 @@ async function saveOpponent(event) {
     const formData = {
         name: document.getElementById('opponent-name').value,
         phone: document.getElementById('opponent-phone').value || null,
-        rating: parseInt(document.getElementById('opponent-rating').value) || 0,
+        rating: parseInt(document.getElementById('opponent-rating').value, 10) || 0,
         review: document.getElementById('opponent-review').value || null,
     };
     
@@ -791,8 +1407,7 @@ function applyStatisticsFromMatches(allMatches) {
     const completedMatches = allMatches.filter(
         m => m.is_completed === true || m.is_completed === 1
     );
-    renderGoalStatistics(completedMatches);
-    renderParticipationStatistics(completedMatches);
+    renderStatisticsDashboard(completedMatches);
 }
 
 async function loadStatistics(forceRefresh = false) {
@@ -805,7 +1420,6 @@ async function loadStatistics(forceRefresh = false) {
             ? (getCachedData('matches') ?? (matches.length > 0 ? matches : null))
             : null;
 
-        // Already have data: render immediately, refresh in background (no loading overlay)
         if (snapshot != null) {
             applyStatisticsFromMatches(snapshot);
             try {
@@ -832,194 +1446,465 @@ async function loadStatistics(forceRefresh = false) {
     }
 }
 
-function renderGoalStatistics(completedMatches) {
-    // Filter by month or quarter if selected
-    let filteredMatches = completedMatches;
-    if (selectedGoalsMonthFilter) {
-        filteredMatches = completedMatches.filter(match => {
-            if (!match.date) return false;
-            const matchMonth = match.date.substring(0, 7); // Get YYYY-MM
-            return matchMonth === selectedGoalsMonthFilter;
-        });
-    } else if (selectedGoalsQuarterFilter) {
-        filteredMatches = completedMatches.filter(match => {
-            if (!match.date) return false;
-            const [year, month] = match.date.substring(0, 7).split('-');
-            const monthNum = parseInt(month);
-            let quarter;
-            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
-            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
-            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
-            else quarter = 'Q4';
-            const matchQuarter = `${year}-${quarter}`;
-            return matchQuarter === selectedGoalsQuarterFilter;
-        });
-    }
-    
-    // Populate month and quarter filter dropdowns
+function renderStatisticsDashboard(completedMatches) {
+    destroyStatsCharts();
+
+    const goalsFiltered = filterMatchesByPeriod(
+        completedMatches, selectedGoalsMonthFilter, selectedGoalsQuarterFilter
+    );
+    const participationFiltered = filterMatchesByPeriod(
+        completedMatches, selectedParticipationMonthFilter, selectedParticipationQuarterFilter
+    );
+
     populateGoalsMonthFilter(completedMatches);
     populateGoalsQuarterFilter(completedMatches);
-    
-    // Calculate player goals data
-    const playerGoalsMap = {}; // { playerId: { name, totalGoals, matches: [{date, goals}] } }
-    
-    // Initialize all players with 0 goals
-    players.forEach(player => {
-        playerGoalsMap[player.id] = {
-            name: player.name,
-            totalGoals: 0,
-            matches: []
-        };
-    });
-    
-    // Process all completed matches (use filtered matches)
-    filteredMatches.forEach(match => {
-        if (match.goals && match.goals.length > 0) {
-            match.goals.forEach(goal => {
-                const playerId = goal.player_id;
-                const playerName = getPlayerName(playerId);
-                const goalsInMatch = goal.goals || 0;
-                
-                if (!playerGoalsMap[playerId]) {
-                    playerGoalsMap[playerId] = {
-                        name: playerName,
-                        totalGoals: 0,
-                        matches: []
-                    };
-                }
-                
-                playerGoalsMap[playerId].totalGoals += goalsInMatch;
-                playerGoalsMap[playerId].matches.push({
-                    date: match.date,
-                    goals: goalsInMatch
-                });
-            });
-        }
-    });
-    
-    // Get all unique match dates (sorted) - use filtered matches for table columns
-    const allMatchDates = [...new Set(filteredMatches.map(m => m.date))].sort();
-    
-    // Get all players (including those who didn't score)
-    const allPlayers = players.map(p => ({
-        id: p.id,
-        name: p.name
-    }));
-    
-    // Filter Top 3 by month or quarter if selected
-    let top3PlayerGoalsMap = playerGoalsMap;
-    if (selectedTop3MonthFilter || selectedTop3QuarterFilter) {
-        // Recalculate playerGoalsMap for Top 3 only
-        top3PlayerGoalsMap = {};
-        players.forEach(player => {
-            top3PlayerGoalsMap[player.id] = {
-                name: player.name,
-                totalGoals: 0,
-                matches: []
-            };
-        });
-        
-        let top3FilteredMatches = completedMatches;
-        if (selectedTop3MonthFilter) {
-            top3FilteredMatches = completedMatches.filter(match => {
-                if (!match.date) return false;
-                const matchMonth = match.date.substring(0, 7);
-                return matchMonth === selectedTop3MonthFilter;
-            });
-        } else if (selectedTop3QuarterFilter) {
-            top3FilteredMatches = completedMatches.filter(match => {
-                if (!match.date) return false;
-                const [year, month] = match.date.substring(0, 7).split('-');
-                const monthNum = parseInt(month);
-                let quarter;
-                if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
-                else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
-                else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
-                else quarter = 'Q4';
-                const matchQuarter = `${year}-${quarter}`;
-                return matchQuarter === selectedTop3QuarterFilter;
-            });
-        }
-        
-        top3FilteredMatches.forEach(match => {
-            if (match.goals && match.goals.length > 0) {
-                match.goals.forEach(goal => {
-                    const playerId = goal.player_id;
-                    const playerName = getPlayerName(playerId);
-                    const goalsInMatch = goal.goals || 0;
-                    
-                    if (!top3PlayerGoalsMap[playerId]) {
-                        top3PlayerGoalsMap[playerId] = {
-                            name: playerName,
-                            totalGoals: 0,
-                            matches: []
-                        };
-                    }
-                    
-                    top3PlayerGoalsMap[playerId].totalGoals += goalsInMatch;
-                    top3PlayerGoalsMap[playerId].matches.push({
-                        date: match.date,
-                        goals: goalsInMatch
-                    });
-                });
-            }
-        });
-    }
-    
-    // Populate Top 3 month and quarter filter dropdowns
     populateTop3MonthFilter(completedMatches);
     populateTop3QuarterFilter(completedMatches);
-    
-    // Render top 3 goalscorers
-    renderTopGoalscorers(top3PlayerGoalsMap);
-    
-    // Bubble chart disabled to keep statistics tab fast on click
-    const bubbleContainer = document.getElementById('goals-bubbles-container');
-    if (bubbleContainer) {
-        bubbleContainer.innerHTML = '<div class="empty-state"><p>Biểu đồ bong bóng đã tắt để tối ưu tốc độ tải</p></div>';
-    }
-    
-    // Render goals table
+    populateParticipationMonthFilter(completedMatches);
+    populateParticipationQuarterFilter(completedMatches);
+
+    const playerGoalsMap = computePlayerGoalsMap(goalsFiltered);
+    const participationArray = computeParticipationMap(participationFiltered);
+    const participationById = {};
+    participationArray.forEach(p => { participationById[String(p.id)] = p; });
+
+    const top3Filtered = filterMatchesByPeriod(
+        completedMatches, selectedTop3MonthFilter, selectedTop3QuarterFilter
+    );
+    const top3GoalsMap = computePlayerGoalsMap(top3Filtered);
+    const top3Participation = computeParticipationMap(top3Filtered);
+    const top3ParticipationById = {};
+    top3Participation.forEach(p => { top3ParticipationById[String(p.id)] = p; });
+
+    const allPlayers = players.map(p => ({ id: p.id, name: p.name }));
+    const allMatchDates = [...new Set(goalsFiltered.map(m => m.date))].sort();
+
+    renderKpiCards(completedMatches, playerGoalsMap, participationArray);
+    renderTopScorersPodium(top3GoalsMap, top3ParticipationById, top3Filtered);
+    renderGoalsRanking(playerGoalsMap);
+    renderGoalsCharts(playerGoalsMap, completedMatches);
+    renderMatchTimeline(completedMatches);
+    renderParticipationCards(participationArray);
+    renderParticipationChart(participationArray);
+    renderAdvancedInsights(completedMatches, playerGoalsMap, participationArray);
+    renderTopScorersTrendChart(completedMatches);
     renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates);
+    renderParticipationTable(completedMatches, participationArray, participationFiltered);
 }
 
-function renderTopGoalscorers(playerGoalsMap) {
-    const container = document.getElementById('top-goalscorers-circles');
+function renderKpiCards(completedMatches, playerGoalsMap, participationArray) {
+    const container = document.getElementById('stats-kpi-grid');
     if (!container) return;
-    
-    // Get top 3 players
+
+    const totalGoals = Object.values(playerGoalsMap).reduce((s, p) => s + p.totalGoals, 0);
+    const matchesPlayed = completedMatches.length;
+    const goalsPerMatch = matchesPlayed > 0 ? (totalGoals / matchesPlayed).toFixed(1) : '0';
+    const playerCount = players.length;
+    const avgParticipation = participationArray.length > 0
+        ? (participationArray.reduce((s, p) => s + p.participationRate, 0) / participationArray.length).toFixed(0)
+        : '0';
+
+    const sorted = Object.values(playerGoalsMap).sort((a, b) => b.totalGoals - a.totalGoals);
+    const topScorer = sorted[0];
+
+    const cards = [
+        { icon: '⚽', label: 'Tổng bàn thắng', value: totalGoals, accent: 'purple' },
+        { icon: '👥', label: 'Cầu thủ', value: playerCount, accent: 'blue' },
+        { icon: '🎮', label: 'Trận đã đấu', value: matchesPlayed, accent: 'green' },
+        { icon: '📈', label: 'Bàn / trận', value: goalsPerMatch, accent: 'orange' },
+        { icon: '🏆', label: 'Vua phá lưới', value: topScorer ? topScorer.name : '—', accent: 'gold', small: true },
+        { icon: '📊', label: 'Tỉ lệ tham gia TB', value: `${avgParticipation}%`, accent: 'purple' }
+    ];
+
+    container.innerHTML = cards.map(c => `
+        <article class="stats-kpi-card stats-kpi-card--${c.accent}">
+            <span class="stats-kpi-icon" aria-hidden="true">${c.icon}</span>
+            <div class="stats-kpi-body">
+                <span class="stats-kpi-value${c.small ? ' stats-kpi-value--sm' : ''}">${escapeHtml(String(c.value))}</span>
+                <span class="stats-kpi-label">${c.label}</span>
+            </div>
+        </article>
+    `).join('');
+}
+
+function renderTopScorersPodium(playerGoalsMap, participationById, completedMatches) {
+    const container = document.getElementById('top-goalscorers-podium');
+    if (!container) return;
+
     const topPlayers = Object.values(playerGoalsMap)
+        .filter(p => p.totalGoals > 0)
         .sort((a, b) => b.totalGoals - a.totalGoals)
         .slice(0, 3);
-    
-    if (topPlayers.length === 0) {
+
+    while (topPlayers.length < 3) {
+        topPlayers.push({ name: '—', totalGoals: 0, id: null });
+    }
+
+    if (topPlayers.every(p => p.totalGoals === 0)) {
         container.innerHTML = '<div class="empty-state"><p>Chưa có dữ liệu ghi bàn</p></div>';
         return;
     }
-    
-    // Pad to 3 if less than 3
-    while (topPlayers.length < 3) {
-        topPlayers.push({ name: '-', totalGoals: 0 });
-    }
-    
-    container.innerHTML = topPlayers.map((player, index) => {
-        const medalClasses = ['medal-gold', 'medal-silver', 'medal-bronze'];
-        const podiumHeights = ['podium-first', 'podium-second', 'podium-third'];
-        const medalIcons = ['🥇', '🥈', '🥉'];
+
+    const medals = ['gold', 'silver', 'bronze'];
+    const medalIcons = ['🥇', '🥈', '🥉'];
+
+    const cards = topPlayers.map((player, rankIdx) => {
+        const part = player.id ? participationById[String(player.id)] : null;
+        const partRate = part ? part.participationRate.toFixed(0) : '—';
+        const trend = player.id ? getPlayerGoalTrend(player, completedMatches) : { dir: 'flat', label: '—' };
+        const trendIcon = trend.dir === 'up' ? '↑' : trend.dir === 'down' ? '↓' : '→';
+        const trendClass = `stats-trend--${trend.dir}`;
+
         return `
-            <div class="goalscorer-card ${podiumHeights[index]}">
-                <div class="goalscorer-circle ${medalClasses[index]}">
-                    <div class="medal-icon">${medalIcons[index]}</div>
-                    <div class="goalscorer-goals">
-                        <span class="goals-number">${player.totalGoals}</span>
-                        <span class="goals-label">bàn</span>
+            <article class="stats-podium-card stats-podium-card--${medals[rankIdx]}">
+                <div class="stats-podium-top">
+                    <div class="stats-podium-avatar-wrap">
+                        ${player.id ? renderStatsPlayerAvatar(player.id, 'md') : '<div class="stats-avatar stats-avatar--md"><div class="stats-avatar-placeholder">—</div></div>'}
                     </div>
+                    <span class="stats-podium-medal" aria-label="Hạng ${rankIdx + 1}">${medalIcons[rankIdx]}</span>
                 </div>
-                <div class="podium-base"></div>
-                <div class="goalscorer-name">${escapeHtml(player.name)}</div>
+                <h4 class="stats-podium-name">${escapeHtml(player.name)}</h4>
+                <div class="stats-podium-goals">
+                    <span class="stats-podium-goals-num">${player.totalGoals}</span>
+                    <span class="stats-podium-goals-label">bàn</span>
+                </div>
+                <div class="stats-podium-meta">
+                    <span class="stats-podium-part">${partRate}% tham gia</span>
+                    <span class="stats-trend ${trendClass}" title="Xu hướng ghi bàn">${trendIcon} ${trend.label}</span>
+                </div>
+            </article>
+        `;
+    });
+
+    container.innerHTML = cards.join('');
+}
+
+function renderGoalsRanking(playerGoalsMap) {
+    const container = document.getElementById('goals-ranking-list');
+    if (!container) return;
+
+    const ranked = Object.values(playerGoalsMap)
+        .filter(p => p.totalGoals > 0)
+        .sort((a, b) => b.totalGoals - a.totalGoals);
+
+    if (ranked.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Chưa có dữ liệu</p></div>';
+        return;
+    }
+
+    const maxGoals = ranked[0].totalGoals || 1;
+
+    container.innerHTML = ranked.map((p, i) => `
+        <div class="stats-rank-row">
+            <span class="stats-rank-pos">${i + 1}</span>
+            ${renderStatsPlayerAvatar(p.id, 'sm')}
+            <div class="stats-rank-info">
+                <span class="stats-rank-name">${escapeHtml(p.name)}</span>
+                <div class="stats-rank-bar-track">
+                    <div class="stats-rank-bar-fill" style="width:${(p.totalGoals / maxGoals) * 100}%"></div>
+                </div>
             </div>
+            <span class="stats-rank-value">${p.totalGoals}</span>
+        </div>
+    `).join('');
+}
+
+function renderGoalsCharts(playerGoalsMap, completedMatches) {
+    const ranked = Object.values(playerGoalsMap)
+        .filter(p => p.totalGoals > 0)
+        .sort((a, b) => b.totalGoals - a.totalGoals)
+        .slice(0, 10);
+
+    const playerCanvas = document.getElementById('goals-by-player-chart');
+    if (playerCanvas && typeof Chart !== 'undefined') {
+        statsCharts.goalsByPlayer = new Chart(playerCanvas, {
+            type: 'bar',
+            data: {
+                labels: ranked.map(p => p.name),
+                datasets: [{
+                    label: 'Bàn thắng',
+                    data: ranked.map(p => p.totalGoals),
+                    backgroundColor: 'rgba(79, 70, 229, 0.75)',
+                    borderColor: 'rgba(79, 70, 229, 1)',
+                    borderWidth: 1,
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    const monthBuckets = {};
+    completedMatches.forEach(m => {
+        if (!m.date) return;
+        const key = m.date.substring(0, 7);
+        const goals = (m.goals || []).reduce((s, g) => s + (g.goals || 0), 0);
+        monthBuckets[key] = (monthBuckets[key] || 0) + goals;
+    });
+    const monthKeys = Object.keys(monthBuckets).sort();
+
+    const monthCanvas = document.getElementById('goals-per-month-chart');
+    if (monthCanvas && typeof Chart !== 'undefined') {
+        statsCharts.goalsPerMonth = new Chart(monthCanvas, {
+            type: 'bar',
+            data: {
+                labels: monthKeys.map(formatStatsMonthLabel),
+                datasets: [{
+                    label: 'Bàn thắng',
+                    data: monthKeys.map(k => monthBuckets[k]),
+                    backgroundColor: 'rgba(99, 102, 241, 0.7)',
+                    borderColor: 'rgba(79, 70, 229, 1)',
+                    borderWidth: 1,
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+}
+
+function aggregateTimelineGoals(matches, viewMode) {
+    const buckets = {};
+    matches.forEach(match => {
+        if (!match.date) return;
+        let key, label;
+        if (viewMode === 'month') {
+            key = match.date.substring(0, 7);
+            label = formatStatsMonthLabel(key);
+        } else if (viewMode === 'quarter') {
+            key = getMatchQuarterKey(match.date);
+            label = key.replace('-', ' ');
+        } else {
+            key = match.date.substring(0, 4);
+            label = `Mùa ${key}`;
+        }
+        const goals = (match.goals || []).reduce((s, g) => s + (g.goals || 0), 0);
+        if (!buckets[key]) buckets[key] = { label, goals: 0 };
+        buckets[key].goals += goals;
+    });
+    return Object.entries(buckets)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, v]) => v);
+}
+
+function renderMatchTimeline(completedMatches) {
+    const container = document.getElementById('match-timeline');
+    if (!container) return;
+
+    const periods = aggregateTimelineGoals(completedMatches, statsTimelineView);
+    if (periods.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Chưa có dữ liệu</p></div>';
+        return;
+    }
+
+    const maxGoals = Math.max(...periods.map(p => p.goals), 1);
+    container.innerHTML = periods.map(p => `
+        <div class="stats-timeline-row">
+            <span class="stats-timeline-label">${escapeHtml(p.label)}</span>
+            <div class="stats-timeline-track" role="presentation">
+                <div class="stats-timeline-fill" style="width:${(p.goals / maxGoals) * 100}%"></div>
+            </div>
+            <span class="stats-timeline-value">${p.goals}</span>
+        </div>
+    `).join('');
+}
+
+function renderParticipationCards(participationArray) {
+    const container = document.getElementById('participation-cards-grid');
+    if (!container) return;
+
+    if (participationArray.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Chưa có dữ liệu tham gia</p></div>';
+        return;
+    }
+
+    const sorted = [...participationArray].sort((a, b) => b.participationRate - a.participationRate);
+    container.innerHTML = sorted.map(p => {
+        const rateColor = p.participationRate >= 80 ? 'var(--color-success)'
+            : p.participationRate >= 50 ? 'var(--color-primary)' : 'var(--color-danger)';
+        return `
+            <article class="stats-participation-card">
+                <div class="stats-participation-header">
+                    ${renderStatsPlayerAvatar(p.id, 'sm')}
+                    <div class="stats-participation-info">
+                        <h4 class="stats-participation-name">${escapeHtml(p.name)}</h4>
+                        <span class="stats-participation-matches">${p.totalParticipated} trận · ${p.totalNotParticipated} vắng</span>
+                    </div>
+                    <span class="stats-participation-rate" style="color:${rateColor}">${p.participationRate.toFixed(0)}%</span>
+                </div>
+                <div class="stats-participation-bar" role="presentation">
+                    <div class="stats-participation-bar-fill" style="width:${p.participationRate}%;background:${rateColor}"></div>
+                </div>
+            </article>
         `;
     }).join('');
+}
+
+function renderParticipationChart(participationArray) {
+    const canvas = document.getElementById('participation-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const sorted = [...participationArray].sort((a, b) => b.participationRate - a.participationRate);
+    statsCharts.participation = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: sorted.map(p => p.name),
+            datasets: [{
+                label: 'Tỉ lệ tham gia %',
+                data: sorted.map(p => p.participationRate),
+                backgroundColor: sorted.map(p =>
+                    p.participationRate >= 80 ? 'rgba(16, 185, 129, 0.75)'
+                    : p.participationRate >= 50 ? 'rgba(79, 70, 229, 0.75)'
+                    : 'rgba(239, 68, 68, 0.75)'
+                ),
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { beginAtZero: true, max: 100, grid: { color: 'rgba(0,0,0,0.04)' } },
+                y: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+function renderAdvancedInsights(completedMatches, playerGoalsMap, participationArray) {
+    const container = document.getElementById('stats-insights-grid');
+    if (!container) return;
+
+    const sortedGoals = Object.values(playerGoalsMap).sort((a, b) => b.totalGoals - a.totalGoals);
+    const topScorer = sortedGoals[0];
+
+    const mostConsistent = [...participationArray]
+        .filter(p => p.totalParticipated >= 3)
+        .sort((a, b) => b.participationRate - a.participationRate || b.totalParticipated - a.totalParticipated)[0];
+
+    const bestAttendance = [...participationArray].sort((a, b) =>
+        b.participationRate - a.participationRate || b.totalParticipated - a.totalParticipated
+    )[0];
+
+    const goalsPerMatch = Object.values(playerGoalsMap)
+        .map(p => {
+            const matchCount = p.matches.length || 1;
+            return { ...p, gpg: p.totalGoals / matchCount, matchCount };
+        })
+        .filter(p => p.totalGoals > 0 && p.matchCount >= 2)
+        .sort((a, b) => b.gpg - a.gpg)[0];
+
+    let mostImproved = null;
+    let bestImprovement = -Infinity;
+    Object.values(playerGoalsMap).forEach(p => {
+        const trend = getPlayerGoalTrend(p, completedMatches);
+        const diff = parseInt(trend.label, 10) || 0;
+        if (diff > bestImprovement) {
+            bestImprovement = diff;
+            mostImproved = p;
+        }
+    });
+
+    const topScorerTrend = topScorer ? getPlayerGoalTrend(topScorer, completedMatches) : null;
+    const trendText = topScorerTrend
+        ? (topScorerTrend.dir === 'up' ? `Tăng ${topScorerTrend.label} bàn` : topScorerTrend.dir === 'down' ? `Giảm ${Math.abs(parseInt(topScorerTrend.label, 10) || 0)} bàn` : 'Ổn định')
+        : '—';
+
+    const insights = [
+        { icon: '🎯', title: 'Ổn định nhất', player: mostConsistent, detail: mostConsistent ? `${mostConsistent.participationRate}% · ${mostConsistent.totalParticipated} trận` : '—' },
+        { icon: '⚡', title: 'Bàn / trận cao nhất', player: goalsPerMatch, detail: goalsPerMatch ? `${goalsPerMatch.gpg.toFixed(2)} bàn/trận` : '—' },
+        { icon: '✅', title: 'Chuyên cần nhất', player: bestAttendance, detail: bestAttendance ? `${bestAttendance.participationRate}% tham gia` : '—' },
+        { icon: '📈', title: 'Tiến bộ nhất', player: mostImproved, detail: mostImproved && bestImprovement > 0 ? `+${bestImprovement} bàn` : '—' },
+        { icon: '👑', title: 'Xu hướng VPPL', player: topScorer, detail: trendText }
+    ];
+
+    container.innerHTML = insights.map(ins => `
+        <article class="stats-insight-card">
+            <span class="stats-insight-icon" aria-hidden="true">${ins.icon}</span>
+            <div class="stats-insight-body">
+                <span class="stats-insight-title">${ins.title}</span>
+                <span class="stats-insight-player">${ins.player ? escapeHtml(ins.player.name) : '—'}</span>
+                <span class="stats-insight-detail">${ins.detail}</span>
+            </div>
+        </article>
+    `).join('');
+}
+
+function renderTopScorersTrendChart(completedMatches) {
+    const canvas = document.getElementById('top-scorers-trend-chart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const allGoals = computePlayerGoalsMap(completedMatches);
+    const top3 = Object.values(allGoals)
+        .filter(p => p.totalGoals > 0)
+        .sort((a, b) => b.totalGoals - a.totalGoals)
+        .slice(0, 3);
+
+    if (top3.length === 0) return;
+
+    const monthKeys = [...new Set(completedMatches.map(m => m.date?.substring(0, 7)).filter(Boolean))].sort();
+    const colors = ['#4F46E5', '#10B981', '#F59E0B'];
+
+    const datasets = top3.map((player, i) => {
+        let cumulative = 0;
+        const data = monthKeys.map(month => {
+            const monthGoals = player.matches
+                .filter(m => m.date && m.date.startsWith(month))
+                .reduce((s, m) => s + m.goals, 0);
+            cumulative += monthGoals;
+            return cumulative;
+        });
+        return {
+            label: player.name,
+            data,
+            borderColor: colors[i],
+            backgroundColor: colors[i] + '22',
+            fill: true,
+            tension: 0.35,
+            pointRadius: 3
+        };
+    });
+
+    statsCharts.topScorersTrend = new Chart(canvas, {
+        type: 'line',
+        data: { labels: monthKeys.map(formatStatsMonthLabel), datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+                y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.04)' } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+function renderGoalStatistics(completedMatches) {
+    renderStatisticsDashboard(completedMatches);
+}
+
+function renderTopGoalscorers(playerGoalsMap) {
+    renderTopScorersPodium(playerGoalsMap, {}, matches);
 }
 
 function renderBubbleChart(playerGoalsMap) {
@@ -1137,6 +2022,10 @@ function renderBubbleChart(playerGoalsMap) {
     }, 100);
 }
 
+// Global variable to track goals table sort state
+let goalsTableSortState = { column: 'total', direction: 'desc' }; // 'asc' or 'desc'
+let participationTableSortState = { column: 'rate', direction: 'desc' }; // 'asc' or 'desc'
+
 function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
     const container = document.getElementById('goals-table-wrapper');
     if (!container) return;
@@ -1248,8 +2137,8 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
     const sortStyle = 'cursor: pointer; user-select: none;';
     
     container.innerHTML = `
-        <div class="goals-table-scroll">
-            <table class="goals-table">
+        <div class="goals-table-scroll stats-table-scroll">
+            <table class="goals-table stats-analytics-table">
                 <thead>
                     <tr>
                         <th>Tên cầu thủ</th>
@@ -1272,17 +2161,13 @@ function renderGoalsTable(playerGoalsMap, allPlayers, allMatchDates) {
 
 function sortGoalsTable(column) {
     if (goalsTableSortState.column === column) {
-        // Toggle direction
         goalsTableSortState.direction = goalsTableSortState.direction === 'desc' ? 'asc' : 'desc';
     } else {
-        // New column, default to desc
         goalsTableSortState.column = column;
         goalsTableSortState.direction = 'desc';
     }
-    
-    // Re-render the goals table
     const allMatches = matches.filter(m => m.is_completed === true || m.is_completed === 1);
-    renderGoalStatistics(allMatches);
+    renderStatisticsDashboard(allMatches);
 }
 
 // Matches/Schedule functions
@@ -1295,6 +2180,150 @@ let selectedTop3QuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (
 let selectedParticipationMonthFilter = ''; // Format: 'YYYY-MM' or '' for all months (for participation statistics)
 let selectedParticipationQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for participation statistics), e.g., '2026-Q1'
 let selectedCompletedQuarterFilter = ''; // Format: 'YYYY-Q' or '' for all quarters (for completed matches), e.g., '2026-Q1'
+let selectedOpponentSearch = '';
+
+const MATCH_GOAL_MINUTES = [12, 25, 38, 45, 52, 63, 70, 78, 85];
+
+function formatMatchDateDisplay(dateKey, timeStr = '19:00') {
+    const d = new Date(dateKey + 'T00:00:00');
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = d.toLocaleDateString('en-GB', { month: 'short' });
+    const year = d.getFullYear();
+    return `${day} ${month} ${year} • ${timeStr}`;
+}
+
+function formatMonthGroupTitle(monthKey) {
+    const [year, monthNum] = monthKey.split('-');
+    const monthNames = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
+        'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'];
+    return `${monthNames[parseInt(monthNum, 10) - 1]} ${year}`;
+}
+
+function getMatchResultInfo(result) {
+    const map = {
+        win: { text: 'WIN', label: 'Thắng', class: 'win' },
+        lose: { text: 'LOSS', label: 'Thua', class: 'loss' },
+        draw: { text: 'DRAW', label: 'Hòa', class: 'draw' }
+    };
+    return map[result] || null;
+}
+
+function renderFcGreenLogo() {
+    return `<div class="mc-team-logo mc-team-logo--home" aria-hidden="true"><span class="mc-team-logo-icon">⚽</span></div>`;
+}
+
+function renderOpponentTeamLogo(name) {
+    const colors = getOpponentAvatarColors(name);
+    const initials = getPlayerInitials(name);
+    return `<div class="mc-team-logo mc-team-logo--away" style="background:${colors.bg};color:${colors.text};border-color:${colors.border}" aria-hidden="true">${initials}</div>`;
+}
+
+function buildGoalscorersTimeline(match) {
+    if (!match.goals || match.goals.length === 0) return '';
+    let minuteIndex = 0;
+    const rows = [];
+    match.goals.forEach(goal => {
+        const playerName = getPlayerName(goal.player_id);
+        const count = goal.goals || 1;
+        for (let i = 0; i < count; i++) {
+            const minute = MATCH_GOAL_MINUTES[minuteIndex % MATCH_GOAL_MINUTES.length];
+            minuteIndex++;
+            rows.push(`<div class="mc-scorer-row"><span class="mc-scorer-icon" aria-hidden="true">⚽</span><span class="mc-scorer-name">${escapeHtml(playerName)}</span><span class="mc-scorer-minute">(${minute}')</span></div>`);
+        }
+    });
+    return `<div class="mc-scorers"><h4 class="mc-scorers-title">Ghi bàn</h4><div class="mc-scorers-list">${rows.join('')}</div></div>`;
+}
+
+function buildMatchStatChips(match, showResult) {
+    const chips = [];
+    if (showResult && match.our_score !== undefined) {
+        chips.push(`<span class="mc-chip">⚽ ${match.our_score} bàn</span>`);
+        const scorersCount = (match.goals || []).reduce((s, g) => s + (g.goals || 0), 0);
+        if (scorersCount > 0) chips.push(`<span class="mc-chip">👥 ${scorersCount} bàn ghi</span>`);
+        const resultInfo = getMatchResultInfo(match.result);
+        if (resultInfo) chips.push(`<span class="mc-chip mc-chip--${resultInfo.class}">🏆 ${resultInfo.label}</span>`);
+        const participants = (match.participant_ids || []).length;
+        if (participants > 0) chips.push(`<span class="mc-chip">📋 ${participants} cầu thủ</span>`);
+    } else {
+        chips.push(`<span class="mc-chip mc-chip--upcoming">📅 Sắp diễn ra</span>`);
+    }
+    return chips.join('');
+}
+
+function renderMatchCard(match, showResult, isLastInGroup = false) {
+    const safeId = String(match.id || '').replace(/'/g, "\\'");
+    const opponentName = match.opponent ? match.opponent.name : `Đối thủ #${match.opponent_id}`;
+    const dateDisplay = formatMatchDateDisplay(match.date);
+    const resultInfo = showResult ? getMatchResultInfo(match.result) : null;
+    const hasScore = showResult && match.our_score !== undefined && match.opponent_score !== undefined;
+    const scoreDisplay = hasScore ? `${match.our_score} - ${match.opponent_score}` : 'VS';
+    const goalscorersHtml = showResult ? buildGoalscorersTimeline(match) : '';
+    const statChips = buildMatchStatChips(match, showResult);
+    const hasDetails = !!(goalscorersHtml || isLoggedIn);
+    const resultBadge = resultInfo
+        ? `<span class="mc-result-badge mc-result-badge--${resultInfo.class}">${resultInfo.text}</span>`
+        : `<span class="mc-result-badge mc-result-badge--upcoming">SẮP ĐÁ</span>`;
+    const expandedClass = hasDetails ? '' : ' mc-match-card--no-details';
+    const timelineClass = isLastInGroup ? ' mc-timeline-item--last' : '';
+
+    const actionsHtml = isLoggedIn ? `
+        <div class="mc-match-actions" onclick="event.stopPropagation()">
+            ${showResult
+                ? `<button type="button" class="btn btn-primary btn-small" onclick="editMatchResult('${safeId}')">Sửa kết quả</button>`
+                : `<button type="button" class="btn btn-primary btn-small" onclick="editMatch('${safeId}')">Sửa</button>`
+            }
+            <button type="button" class="btn btn-danger btn-small" onclick="deleteMatch('${safeId}')">Xóa</button>
+        </div>` : '';
+
+    const detailsHint = hasDetails
+        ? `<span class="mc-expand-hint" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span>`
+        : '';
+
+    return `
+        <article class="mc-timeline-item${timelineClass}" role="listitem">
+            <div class="mc-timeline-node" aria-hidden="true"></div>
+            <div class="mc-match-card${expandedClass}${resultInfo ? ` mc-match-card--${resultInfo.class}` : ' mc-match-card--upcoming'}" data-match-id="${escapeHtml(String(match.id || ''))}" onclick="toggleMatchCardExpand('${safeId}', event)" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleMatchCardExpand('${safeId}', event)}">
+                <div class="mc-match-compact">
+                    <time class="mc-match-date" datetime="${match.date}">${dateDisplay}</time>
+                    <div class="mc-match-scoreboard">
+                        <div class="mc-team mc-team--home">
+                            ${renderFcGreenLogo()}
+                            <span class="mc-team-name">FC Green</span>
+                        </div>
+                        <div class="mc-score${hasScore ? '' : ' mc-score--vs'}">${scoreDisplay}</div>
+                        <div class="mc-team mc-team--away">
+                            ${renderOpponentTeamLogo(opponentName)}
+                            <span class="mc-team-name">${escapeHtml(opponentName)}</span>
+                        </div>
+                    </div>
+                    <div class="mc-match-meta">
+                        ${resultBadge}
+                        <div class="mc-stat-chips">${statChips}</div>
+                        ${detailsHint}
+                    </div>
+                </div>
+                <div class="mc-match-details">
+                    ${goalscorersHtml}
+                    ${actionsHtml}
+                </div>
+            </div>
+        </article>`;
+}
+
+function toggleMatchCardExpand(matchId, event) {
+    if (event && (event.target.closest('.mc-match-actions') || event.target.closest('button'))) return;
+    const card = document.querySelector(`.mc-match-card[data-match-id="${matchId}"]`);
+    if (card && !card.classList.contains('mc-match-card--no-details')) {
+        card.classList.toggle('mc-match-card--expanded');
+    }
+}
+
+function filterCompletedMatchesByOpponent() {
+    const input = document.getElementById('match-opponent-search');
+    if (!input) return;
+    selectedOpponentSearch = input.value.trim().toLowerCase();
+    renderCompletedMatches();
+}
 
 async function loadMatches(forceRefresh = false) {
     try {
@@ -1310,6 +2339,8 @@ async function loadMatches(forceRefresh = false) {
                 if (opponents.length > 0) {
                     renderOpponents();
                 }
+                updateHeaderStats();
+                if (players.length > 0) renderPlayers();
             },
             { forceRefresh, staleData: matches.length > 0 ? matches : null }
         );
@@ -1352,153 +2383,194 @@ function getPlayerName(playerId) {
     return 'Cầu thủ đã xóa';
 }
 
+function getPlayerById(playerId) {
+    return players.find(p => p.id === playerId) || null;
+}
+
+function renderStatsPlayerAvatar(playerOrId, sizeClass = '') {
+    const player = typeof playerOrId === 'object' ? playerOrId : getPlayerById(playerOrId);
+    const name = player ? player.name : (typeof playerOrId === 'string' ? getPlayerName(playerOrId) : '?');
+    const initials = getPlayerInitials(name);
+    const sizeAttr = sizeClass ? ` stats-avatar--${sizeClass}` : '';
+    if (player) {
+        const imageUrl = getPlayerImageUrl(player);
+        if (imageUrl) {
+            return `<div class="stats-avatar${sizeAttr}">
+                <div class="stats-avatar-placeholder" style="display:none">${initials}</div>
+                <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(name)}" class="stats-avatar-img"
+                     onerror="this.style.display='none';this.previousElementSibling.style.display='flex'">
+            </div>`;
+        }
+    }
+    return `<div class="stats-avatar${sizeAttr}"><div class="stats-avatar-placeholder">${initials}</div></div>`;
+}
+
+function destroyStatsCharts() {
+    Object.keys(statsCharts).forEach(key => {
+        if (statsCharts[key]) {
+            statsCharts[key].destroy();
+            statsCharts[key] = null;
+        }
+    });
+}
+
+function getMatchQuarterKey(dateStr) {
+    if (!dateStr) return '';
+    const [year, month] = dateStr.substring(0, 7).split('-');
+    const monthNum = parseInt(month, 10);
+    let quarter;
+    if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
+    else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
+    else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
+    else quarter = 'Q4';
+    return `${year}-${quarter}`;
+}
+
+function filterMatchesByPeriod(matches, monthFilter, quarterFilter) {
+    if (monthFilter) {
+        return matches.filter(m => m.date && m.date.substring(0, 7) === monthFilter);
+    }
+    if (quarterFilter) {
+        return matches.filter(m => m.date && getMatchQuarterKey(m.date) === quarterFilter);
+    }
+    return matches;
+}
+
+function computePlayerGoalsMap(matchList) {
+    const playerGoalsMap = {};
+    players.forEach(player => {
+        playerGoalsMap[String(player.id)] = { id: player.id, name: player.name, totalGoals: 0, matches: [] };
+    });
+    matchList.forEach(match => {
+        (match.goals || []).forEach(goal => {
+            const playerId = String(goal.player_id);
+            const goalsInMatch = goal.goals || 0;
+            if (!playerGoalsMap[playerId]) {
+                playerGoalsMap[playerId] = {
+                    id: goal.player_id,
+                    name: getPlayerName(goal.player_id),
+                    totalGoals: 0,
+                    matches: []
+                };
+            }
+            playerGoalsMap[playerId].totalGoals += goalsInMatch;
+            playerGoalsMap[playerId].matches.push({ date: match.date, goals: goalsInMatch });
+        });
+    });
+    return playerGoalsMap;
+}
+
+function computeParticipationMap(matchList) {
+    const participationData = {};
+    players.forEach(player => {
+        participationData[String(player.id)] = {
+            id: player.id,
+            name: player.name,
+            matches: {},
+            totalParticipated: 0,
+            totalNotParticipated: 0
+        };
+    });
+    matchList.forEach(match => {
+        const participantIds = (match.participant_ids || []).map(id => String(id));
+        players.forEach(player => {
+            const key = String(player.id);
+            const participated = participantIds.includes(key) ? 1 : 0;
+            participationData[key].matches[match.date] = participated;
+            if (participated === 1) {
+                participationData[key].totalParticipated++;
+            } else {
+                participationData[key].totalNotParticipated++;
+            }
+        });
+    });
+    return Object.values(participationData).map(pd => {
+        const total = pd.totalParticipated + pd.totalNotParticipated;
+        return {
+            ...pd,
+            participationRate: total > 0 ? parseFloat(((pd.totalParticipated / total) * 100).toFixed(1)) : 0
+        };
+    });
+}
+
+function getPlayerGoalTrend(playerData, allMatches) {
+    if (!playerData || allMatches.length < 2) return { dir: 'flat', label: '—' };
+    const sorted = [...allMatches].filter(m => m.date).sort((a, b) => a.date.localeCompare(b.date));
+    const mid = Math.floor(sorted.length / 2);
+    const firstHalf = sorted.slice(0, mid);
+    const secondHalf = sorted.slice(mid);
+    const sumGoals = (list) => list.reduce((sum, m) => {
+        const g = (m.goals || []).find(x => String(x.player_id) === String(playerData.id));
+        return sum + (g ? (g.goals || 0) : 0);
+    }, 0);
+    const first = sumGoals(firstHalf);
+    const second = sumGoals(secondHalf);
+    if (second > first) return { dir: 'up', label: `+${second - first}` };
+    if (second < first) return { dir: 'down', label: `${second - first}` };
+    return { dir: 'flat', label: '0' };
+}
+
+function formatStatsMonthLabel(ym) {
+    const [year, month] = ym.split('-');
+    const months = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'];
+    return `${months[parseInt(month, 10) - 1]}/${year.slice(2)}`;
+}
+
+function setStatsTimelineView(view) {
+    statsTimelineView = view;
+    document.querySelectorAll('[data-timeline-view]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-timeline-view') === view);
+    });
+    const completed = matches.filter(m => m.is_completed === true || m.is_completed === 1);
+    renderMatchTimeline(completed);
+}
+
 function renderMatchesList(matchesList, showResult = false) {
     if (!matchesList || matchesList.length === 0) {
         return '<div class="empty-state"><h3>Chưa có trận đấu</h3></div>';
     }
-    
-    // Filter out invalid matches (missing date)
+
     const validMatches = matchesList.filter(match => match && match.date);
     if (validMatches.length === 0) {
         return '<div class="empty-state"><h3>Chưa có trận đấu</h3></div>';
     }
-    
-    // Sort matches by date descending (newest first) for both completed and upcoming matches
+
     const sortedMatches = [...validMatches].sort((a, b) => {
         try {
-            // Parse dates (YYYY-MM-DD format) - compare dates only
             const dateAParts = a.date.split('-');
             const dateBParts = b.date.split('-');
             if (dateAParts.length !== 3 || dateBParts.length !== 3) return 0;
             const dateA = new Date(parseInt(dateAParts[0]), parseInt(dateAParts[1]) - 1, parseInt(dateAParts[2])).getTime();
             const dateB = new Date(parseInt(dateBParts[0]), parseInt(dateBParts[1]) - 1, parseInt(dateBParts[2])).getTime();
-            // Sort descending (newest first) for both completed and upcoming matches
             return dateB - dateA;
         } catch (e) {
             return 0;
         }
     });
-    
-    // Group matches by date
-    const matchesByDate = {};
+
+    const matchesByMonth = {};
     sortedMatches.forEach(match => {
-        const dateKey = match.date; // YYYY-MM-DD
-        if (!matchesByDate[dateKey]) {
-            matchesByDate[dateKey] = [];
-        }
-        matchesByDate[dateKey].push(match);
+        const monthKey = match.date.substring(0, 7);
+        if (!matchesByMonth[monthKey]) matchesByMonth[monthKey] = [];
+        matchesByMonth[monthKey].push(match);
     });
-    
-    // Render timeline
-    return Object.keys(matchesByDate).map(dateKey => {
-        const dateMatches = matchesByDate[dateKey];
-        const matchDate = new Date(dateKey + 'T00:00:00');
-        const day = String(matchDate.getDate()).padStart(2, '0');
-        const month = String(matchDate.getMonth() + 1).padStart(2, '0');
-        const year = matchDate.getFullYear();
-        
-        // Determine timeline-items background color based on match results (if showResult = true)
-        let timelineItemsStyle = '';
-        let matchTimeColor = '#333'; // Default color
-        if (showResult && dateMatches.length > 0) {
-            // Get the result of the first match in the group
-            const firstMatch = dateMatches[0];
-            if (firstMatch.result === 'win') {
-                timelineItemsStyle = 'background: #28a745;'; // Green
-                matchTimeColor = '#fff'; // White text on green background
-            } else if (firstMatch.result === 'lose') {
-                timelineItemsStyle = 'background: #dc3545;'; // Red
-                matchTimeColor = '#fff'; // White text on red background
-            } else if (firstMatch.result === 'draw') {
-                timelineItemsStyle = 'background: #ffc107;'; // Yellow
-                matchTimeColor = '#333'; // Dark text on yellow background
-            }
-        }
-        
+
+    const monthKeys = Object.keys(matchesByMonth).sort((a, b) => b.localeCompare(a));
+
+    return `<div class="mc-matches-list" role="list">${monthKeys.map(monthKey => {
+        const monthMatches = matchesByMonth[monthKey];
+        const monthTitle = formatMonthGroupTitle(monthKey);
         return `
-            <div class="timeline-date-group">
-                ${!showResult ? `<div class="timeline-date-header">
-                    <h3>LỊCH THI ĐẤU NGÀY ${day}-${month}</h3>
-                </div>` : ''}
-                <div class="timeline-items" style="${timelineItemsStyle}">
-                    ${dateMatches.map(match => {
-                        // Use default time 19:00 since model doesn't have time field
-                        const timeStr = '19H00';
-                        const dateDisplay = `${timeStr} NGÀY ${day}/${month}/${year}`;
-                        const opponentName = match.opponent ? match.opponent.name : `Opponent ID: ${match.opponent_id}`;
-                        
-                        // Map result to Vietnamese for display
-                        const resultText = showResult && match.result ? {
-                            'win': 'Thắng',
-                            'lose': 'Thua',
-                            'draw': 'Hòa'
-                        }[match.result] : null;
-                        
-                        // Determine score display for left and right
-                        const leftScore = showResult && match.our_score !== undefined ? match.our_score : '';
-                        const rightScore = showResult && match.opponent_score !== undefined ? match.opponent_score : '';
-                        
-                        // Determine result badge color
-                        let resultBadgeClass = 'match-vs'; // Default to VS style
-                        let resultBadgeText = 'VS';
-                        let resultBadgeStyle = '';
-                        
-                        if (resultText) {
-                            resultBadgeText = resultText;
-                            // Set background color based on result
-                            if (match.result === 'win') {
-                                resultBadgeStyle = 'background: #28a745; color: white;'; // Green
-                            } else if (match.result === 'lose') {
-                                resultBadgeStyle = 'background: #dc3545; color: white;'; // Red
-                            } else if (match.result === 'draw') {
-                                resultBadgeStyle = 'background: #ffc107; color: #333;'; // Yellow
-                            }
-                        }
-                        
-                        // Build goals list if completed
-                        let goalsList = '';
-                        if (showResult && match.goals && match.goals.length > 0) {
-                            goalsList = '<div class="match-goals-list" style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #e9ecef; width: 100%; min-width: 0; box-sizing: border-box;">';
-                            match.goals.forEach(goal => {
-                                const playerName = getPlayerName(goal.player_id);
-                                goalsList += `<div style="margin: 5px 0; color: #333; font-weight: 500; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;">- <span style="color: #667eea; font-weight: 600; word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(playerName)}</span> : <span style="color: #28a745; font-weight: 700; font-size: 1.1em;">${goal.goals}</span> bàn</div>`;
-                            });
-                            goalsList += '</div>';
-                        }
-                        
-                        return `
-                            <div class="timeline-match">
-                                <div class="match-time" style="text-align: center; color: ${matchTimeColor}; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;">${dateDisplay}</div>
-                                <div class="match-card">
-                                    <div style="display: flex; flex-direction: column; width: 100%; min-width: 0; box-sizing: border-box;">
-                                        <div style="display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: wrap; width: 100%;" class="match-main-content">
-                                            <div class="match-team-left" style="min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; justify-content: flex-start;">
-                                                <span class="team-name" style="display: block; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; flex: 1; text-align: left;">FC GREEN</span>
-                                                ${leftScore !== '' ? `<div class="match-score-left" style="flex-shrink: 0;">${leftScore}</div>` : ''}
-                                            </div>
-                                            <div class="match-vs" style="${resultBadgeStyle} flex-shrink: 0;">${resultBadgeText}</div>
-                                            <div class="match-team-right" style="min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 10px; justify-content: flex-end;">
-                                                ${rightScore !== '' ? `<div class="match-score-right" style="flex-shrink: 0;">${rightScore}</div>` : ''}
-                                                <span class="team-name" style="display: block; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%; flex: 1; text-align: right;">${escapeHtml(opponentName)}</span>
-                                            </div>
-                                            <div class="match-actions" ${!isLoggedIn ? 'style="display: none; flex-basis: 100%;"' : 'style="flex-basis: 100%;"'}">
-                                                ${showResult 
-                                                    ? `<button class="btn btn-primary btn-small" onclick="editMatchResult('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa kết quả</button>`
-                                                    : `<button class="btn btn-primary btn-small" onclick="editMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa</button>`
-                                                }
-                                                <button class="btn btn-danger btn-small" onclick="deleteMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Xóa</button>
-                                            </div>
-                                        </div>
-                                        ${goalsList}
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
+            <section class="mc-month-group">
+                <header class="mc-month-header">
+                    <h3 class="mc-month-title">${monthTitle}</h3>
+                    <span class="mc-month-count">${monthMatches.length} trận</span>
+                </header>
+                <div class="mc-month-timeline" role="list">
+                    ${monthMatches.map((match, idx) => renderMatchCard(match, showResult, idx === monthMatches.length - 1)).join('')}
                 </div>
-            </div>
-        `;
-    }).join('');
+            </section>`;
+    }).join('')}</div>`;
 }
 
 function renderUpcomingMatches() {
@@ -1543,7 +2615,7 @@ function renderCompletedMatches() {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Today at 00:00:00
     
-    // Get all completed matches (before filtering by month/quarter)
+    // Get all completed matches (before filtering by month)
     const allCompletedMatches = matches.filter(match => {
         // Check if match is marked as completed (handle undefined/null as false)
         const isCompleted = match.is_completed === true || match.is_completed === 1;
@@ -1591,6 +2663,13 @@ function renderCompletedMatches() {
             return matchQuarter === selectedCompletedQuarterFilter;
         });
     }
+
+    if (selectedOpponentSearch) {
+        completedMatches = completedMatches.filter(match => {
+            const name = (match.opponent?.name || '').toLowerCase();
+            return name.includes(selectedOpponentSearch);
+        });
+    }
     
     // Sort by date descending (newest first)
     completedMatches.sort((a, b) => {
@@ -1622,8 +2701,10 @@ function renderCompletedMatches() {
     // Re-set selected values after innerHTML is set (because innerHTML resets form values)
     const monthFilterAfter = document.getElementById('month-filter');
     const quarterFilterAfter = document.getElementById('completed-quarter-filter');
+    const opponentSearchAfter = document.getElementById('match-opponent-search');
     if (monthFilterAfter) monthFilterAfter.value = selectedMonthFilter;
     if (quarterFilterAfter) quarterFilterAfter.value = selectedCompletedQuarterFilter;
+    if (opponentSearchAfter) opponentSearchAfter.value = selectedOpponentSearch;
 }
 
 function populateMonthFilter(completedMatches) {
@@ -1644,8 +2725,8 @@ function populateMonthFilter(completedMatches) {
         return b.localeCompare(a); // Descending order
     });
     
-    // Clear existing options except "Tất cả các tháng"
-    monthFilter.innerHTML = '<option value="">Tất cả các tháng</option>';
+    // Clear existing options except "Tất cả"
+    monthFilter.innerHTML = '<option value="">Tất cả</option>';
     
     // Add month options
     months.forEach(month => {
@@ -1704,8 +2785,8 @@ function populateCompletedQuarterFilter(completedMatches) {
         return b.localeCompare(a); // Descending order
     });
     
-    // Clear existing options except "Tất cả các quý"
-    quarterFilter.innerHTML = '<option value="">Tất cả các quý</option>';
+    // Clear existing options except "Tất cả"
+    quarterFilter.innerHTML = '<option value="">Tất cả</option>';
     
     // Add quarter options
     quarters.forEach(quarterKey => {
@@ -2083,80 +3164,7 @@ function filterTop3ByQuarter() {
 function renderMatches() {
     const container = document.getElementById('matches-list');
     if (!container) return;
-    
-    if (matches.length === 0) {
-        container.innerHTML = '<div class="empty-state"><h3>Chưa có lịch thi đấu</h3><p>Click "Thêm lịch thi đấu" để thêm trận đấu mới</p></div>';
-        return;
-    }
-    
-    // Sort matches by date (oldest first for timeline)
-    const sortedMatches = [...matches].sort((a, b) => {
-        const dateA = new Date(a.date + 'T00:00:00').getTime();
-        const dateB = new Date(b.date + 'T00:00:00').getTime();
-        return dateA - dateB;
-    });
-    
-    // Group matches by date
-    const matchesByDate = {};
-    sortedMatches.forEach(match => {
-        const dateKey = match.date; // YYYY-MM-DD
-        if (!matchesByDate[dateKey]) {
-            matchesByDate[dateKey] = [];
-        }
-        matchesByDate[dateKey].push(match);
-    });
-    
-    // Render timeline
-    container.innerHTML = Object.keys(matchesByDate).map(dateKey => {
-        const dateMatches = matchesByDate[dateKey];
-        const matchDate = new Date(dateKey + 'T00:00:00');
-        const dateStr = matchDate.toLocaleDateString('vi-VN', {
-            year: 'numeric',
-            month: 'numeric',
-            day: 'numeric'
-        });
-        const day = String(matchDate.getDate()).padStart(2, '0');
-        const month = String(matchDate.getMonth() + 1).padStart(2, '0');
-        const year = matchDate.getFullYear();
-        
-        return `
-            <div class="timeline-date-group">
-                <div class="timeline-date-header">
-                    <h3>LỊCH THI ĐẤU NGÀY ${day}-${month}</h3>
-                </div>
-                <div class="timeline-items">
-                    ${dateMatches.map(match => {
-                        // Parse datetime from match.date (YYYY-MM-DD) and use stored time or default 19:00
-                        const matchDateObj = new Date(match.date + 'T00:00:00');
-                        const hours = matchDateObj.getHours() || 19;
-                        const minutes = matchDateObj.getMinutes() || 0;
-                        const timeStr = `${String(hours).padStart(2, '0')}H${String(minutes).padStart(2, '0')}`;
-                        const dateDisplay = `${timeStr} NGÀY ${day}/${month}/${year}`;
-                        const opponentName = match.opponent ? match.opponent.name : `Opponent ID: ${match.opponent_id}`;
-                        
-                        return `
-                            <div class="timeline-match">
-                                <div class="match-time">${dateDisplay}</div>
-                                <div class="match-card">
-                                    <div class="match-team-left">
-                                        <span class="team-name">FC GREEN</span>
-                                    </div>
-                                    <div class="match-vs">VS</div>
-                                    <div class="match-team-right">
-                                        <span class="team-name">${escapeHtml(opponentName)}</span>
-                                    </div>
-                                    <div class="match-actions" ${!isLoggedIn ? 'style="display: none;"' : ''}>
-                                        <button class="btn btn-primary btn-small" onclick="editMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Sửa</button>
-                                        <button class="btn btn-danger btn-small" onclick="deleteMatch('${String(match.id || '').replace(/'/g, "\\'")}')">Xóa</button>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            </div>
-        `;
-    }).join('');
+    container.innerHTML = renderMatchesList(matches, false);
 }
 
 function updateOpponentSelects() {
@@ -2276,6 +3284,8 @@ async function saveMatch(event) {
         invalidateMatchesCache();
         closeMatchModal();
         await loadMatches(true);
+        // Update opponents to refresh head-to-head records
+        if (opponents.length > 0) renderOpponents();
     } catch (error) {
         alert('Error saving match: ' + error.message);
     } finally {
@@ -2398,6 +3408,24 @@ function closeUpcomingMatchModal() {
 }
 
 // Match Result Modal functions
+function getMatchResultFromScores(ourScore, opponentScore) {
+    if (ourScore > opponentScore) return 'win';
+    if (ourScore < opponentScore) return 'lose';
+    return 'draw';
+}
+
+function updateMatchResultPreview() {
+    const ourScore = parseInt(document.getElementById('match-our-score')?.value, 10) || 0;
+    const opponentScore = parseInt(document.getElementById('match-opponent-score')?.value, 10) || 0;
+    const result = getMatchResultFromScores(ourScore, opponentScore);
+    const badge = document.getElementById('match-result-badge');
+    if (!badge) return;
+
+    const info = getMatchResultInfo(result);
+    badge.textContent = info ? info.label : 'Hòa';
+    badge.className = `mrm-result-badge mrm-result-badge--${result}`;
+}
+
 function openMatchResultModal(matchId) {
     editingMatchResultId = matchId;
     const modal = document.getElementById('match-result-modal');
@@ -2409,13 +3437,27 @@ function openMatchResultModal(matchId) {
         return;
     }
     
-    // Populate form with existing data
-    const resultRadio = document.querySelector(`input[name="match-result"][value="${match.result || 'draw'}"]`);
-    if (resultRadio) resultRadio.checked = true;
-    
     document.getElementById('match-our-score').value = match.our_score || 0;
     document.getElementById('match-opponent-score').value = match.opponent_score || 0;
-    document.getElementById('match-result-opponent-label').textContent = match.opponent ? match.opponent.name : 'Đối thủ';
+    updateMatchResultPreview();
+    const opponentName = match.opponent ? match.opponent.name : 'Đối thủ';
+    document.getElementById('match-result-opponent-label').textContent = opponentName;
+    
+    const opponentLogoEl = document.getElementById('match-result-opponent-logo');
+    if (opponentLogoEl) {
+        if (match.opponent) {
+            const colors = getOpponentAvatarColors(match.opponent.name);
+            opponentLogoEl.textContent = getPlayerInitials(match.opponent.name);
+            opponentLogoEl.style.background = colors.bg;
+            opponentLogoEl.style.color = colors.text;
+            opponentLogoEl.style.borderColor = colors.border;
+        } else {
+            opponentLogoEl.textContent = '?';
+            opponentLogoEl.style.background = '#F3F4F6';
+            opponentLogoEl.style.color = '#6B7280';
+            opponentLogoEl.style.borderColor = '#E5E7EB';
+        }
+    }
     
     // Load participants
     renderMatchParticipants(match.participant_ids || []);
@@ -2433,6 +3475,19 @@ function openMatchResultModal(matchId) {
     modal.classList.add('active');
 }
 
+function renderMrmPlayerAvatar(player) {
+    const initials = getPlayerInitials(player.name);
+    const imageUrl = getPlayerImageUrl(player);
+    if (imageUrl) {
+        return `<div class="mrm-player-avatar">
+            <div class="mrm-player-avatar-placeholder" style="display:none">${initials}</div>
+            <img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(player.name)}" class="mrm-player-avatar-img"
+                 onerror="this.style.display='none';this.previousElementSibling.style.display='flex'">
+        </div>`;
+    }
+    return `<div class="mrm-player-avatar"><div class="mrm-player-avatar-placeholder">${initials}</div></div>`;
+}
+
 function renderMatchParticipants(selectedPlayerIds = []) {
     const container = document.getElementById('match-participants-container');
     if (!container) return;
@@ -2442,16 +3497,25 @@ function renderMatchParticipants(selectedPlayerIds = []) {
         return;
     }
     
-    // Normalize selectedPlayerIds to strings for comparison
     const normalizedSelectedIds = selectedPlayerIds.map(id => String(id));
     
     container.innerHTML = players.map(player => {
         const playerIdStr = String(player.id);
         const isChecked = normalizedSelectedIds.includes(playerIdStr);
+        const jerseyBadge = player.jersey_number
+            ? `<span class="mrm-jersey-badge">#${player.jersey_number}</span>`
+            : '';
         return `
-            <label class="position-checkbox" style="display: flex; align-items: center; padding: 8px 12px; border: 2px solid #e9ecef; border-radius: 6px; cursor: pointer; transition: all 0.2s; background: white; margin-bottom: 8px;">
-                <input type="checkbox" value="${playerIdStr}" ${isChecked ? 'checked' : ''} style="margin-right: 8px; cursor: pointer; width: 18px; height: 18px;">
-                <span style="flex: 1; color: #333; font-size: 0.95em;">${escapeHtml(player.name)}${player.jersey_number ? ` (#${player.jersey_number})` : ''}</span>
+            <label class="mrm-player-card position-checkbox">
+                <input type="checkbox" value="${playerIdStr}" ${isChecked ? 'checked' : ''}>
+                <div class="mrm-player-card-inner">
+                    <span class="mrm-player-check" aria-hidden="true">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </span>
+                    ${renderMrmPlayerAvatar(player)}
+                    <span class="mrm-player-name">${escapeHtml(player.name)}</span>
+                    ${jerseyBadge}
+                </div>
             </label>
         `;
     }).join('');
@@ -2469,15 +3533,19 @@ function addGoalEntry() {
     addGoalEntryRow(null, 1);
 }
 
+function removeGoalEntryRow(goalRow) {
+    goalRow.classList.add('mrm-row-exit');
+    goalRow.addEventListener('animationend', () => goalRow.remove(), { once: true });
+}
+
 function addGoalEntryRow(playerId = null, goals = 1) {
     const container = document.getElementById('match-goals-container');
     const goalRow = document.createElement('div');
-    goalRow.className = 'goal-entry-row';
-    goalRow.style.cssText = 'display: flex; gap: 10px; align-items: center; margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 6px;';
+    goalRow.className = 'goal-entry-row mrm-goal-row';
     
     const playerSelect = document.createElement('select');
     playerSelect.required = true;
-    playerSelect.style.cssText = 'flex: 1; padding: 8px; border: 2px solid #e9ecef; border-radius: 6px;';
+    playerSelect.setAttribute('aria-label', 'Chọn cầu thủ ghi bàn');
     playerSelect.innerHTML = '<option value="">Chọn cầu thủ</option>' + 
         players.map(p => `<option value="${p.id}" ${playerId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.jersey_number ? ` (#${p.jersey_number})` : ''}</option>`).join('');
     
@@ -2487,14 +3555,15 @@ function addGoalEntryRow(playerId = null, goals = 1) {
     goalsInput.value = goals;
     goalsInput.required = true;
     goalsInput.placeholder = 'Số bàn';
-    goalsInput.style.cssText = 'width: 100px; padding: 8px; border: 2px solid #e9ecef; border-radius: 6px;';
+    goalsInput.className = 'mrm-goal-count';
+    goalsInput.setAttribute('aria-label', 'Số bàn thắng');
     
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
-    removeBtn.textContent = '×';
-    removeBtn.className = 'btn btn-danger btn-small';
-    removeBtn.style.cssText = 'padding: 8px 12px;';
-    removeBtn.onclick = () => goalRow.remove();
+    removeBtn.className = 'mrm-goal-remove';
+    removeBtn.setAttribute('aria-label', 'Xóa cầu thủ ghi bàn');
+    removeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    removeBtn.onclick = () => removeGoalEntryRow(goalRow);
     
     goalRow.appendChild(playerSelect);
     goalRow.appendChild(goalsInput);
@@ -2507,13 +3576,13 @@ async function saveMatchResult(event) {
     showLoading();
     
     try {
-        const result = document.querySelector('input[name="match-result"]:checked').value;
         const ourScore = parseInt(document.getElementById('match-our-score').value);
         const opponentScore = parseInt(document.getElementById('match-opponent-score').value);
+        const result = getMatchResultFromScores(ourScore, opponentScore);
         
-        // Get selected participants
+        // Get selected participants (keep as strings since Firestore uses string IDs)
         const participantCheckboxes = document.querySelectorAll('#match-participants-container input[type="checkbox"]:checked');
-        const participantIds = Array.from(participantCheckboxes).map(cb => String(cb.value));
+        const participantIds = Array.from(participantCheckboxes).map(cb => cb.value);
         
         if (participantIds.length === 0) {
             alert('Vui lòng chọn ít nhất 1 cầu thủ tham gia trận đấu');
@@ -2524,7 +3593,7 @@ async function saveMatchResult(event) {
         const goalRows = document.querySelectorAll('.goal-entry-row');
         const goals = [];
         goalRows.forEach(row => {
-            const playerId = String(row.querySelector('select').value);
+            const playerId = row.querySelector('select').value;
             const goalsCount = parseInt(row.querySelector('input[type="number"]').value);
             if (playerId && goalsCount > 0) {
                 goals.push({ player_id: playerId, goals: goalsCount });
@@ -2557,135 +3626,46 @@ function editMatchResult(id) {
 }
 
 // Participation Statistics functions
-function renderParticipationStatistics(completedMatches) {
+function renderParticipationTable(completedMatches, participationArray, filteredMatches) {
     const container = document.getElementById('participation-table-wrapper');
     if (!container) return;
-    
-    // Filter by month or quarter if selected
-    let filteredMatches = completedMatches;
-    if (selectedParticipationMonthFilter) {
-        filteredMatches = completedMatches.filter(match => {
-            if (!match.date) return false;
-            const matchMonth = match.date.substring(0, 7); // Get YYYY-MM
-            return matchMonth === selectedParticipationMonthFilter;
-        });
-    } else if (selectedParticipationQuarterFilter) {
-        filteredMatches = completedMatches.filter(match => {
-            if (!match.date) return false;
-            const [year, month] = match.date.substring(0, 7).split('-');
-            const monthNum = parseInt(month);
-            let quarter;
-            if (monthNum >= 1 && monthNum <= 3) quarter = 'Q1';
-            else if (monthNum >= 4 && monthNum <= 6) quarter = 'Q2';
-            else if (monthNum >= 7 && monthNum <= 9) quarter = 'Q3';
-            else quarter = 'Q4';
-            const matchQuarter = `${year}-${quarter}`;
-            return matchQuarter === selectedParticipationQuarterFilter;
-        });
-    }
-    
-    // Populate month and quarter filter dropdowns
-    populateParticipationMonthFilter(completedMatches);
-    populateParticipationQuarterFilter(completedMatches);
-    
-    if (filteredMatches.length === 0) {
+
+    if (!filteredMatches || filteredMatches.length === 0) {
         container.innerHTML = '<div class="empty-state"><p>Chưa có dữ liệu tham gia trận đấu</p></div>';
         return;
     }
-    
-    // Get all unique match dates (sorted) - use filtered matches
+
     const allMatchDates = [...new Set(filteredMatches.map(m => m.date))].sort();
-    
-    // Build participation data: { playerId: { name, matches: { date: 1/0 }, totalParticipated, totalNotParticipated } }
-    const participationData = {};
-    
-    // Initialize all players
-    players.forEach(player => {
-        participationData[player.id] = {
-            name: player.name,
-            matches: {},
-            totalParticipated: 0,
-            totalNotParticipated: 0
-        };
-    });
-    
-    // Process each match (use filtered matches)
-    filteredMatches.forEach(match => {
-        const matchDate = match.date;
-        const participantIds = match.participant_ids || [];
-        
-        // For each player, mark if they participated
-        players.forEach(player => {
-            if (!participationData[player.id]) {
-                participationData[player.id] = {
-                    name: player.name,
-                    matches: {},
-                    totalParticipated: 0,
-                    totalNotParticipated: 0
-                };
-            }
-            
-            const participated = participantIds.includes(player.id) ? 1 : 0;
-            participationData[player.id].matches[matchDate] = participated;
-            
-            if (participated === 1) {
-                participationData[player.id].totalParticipated++;
-            } else {
-                participationData[player.id].totalNotParticipated++;
-            }
-        });
-    });
-    
-    // Convert to array and calculate participation rate for sorting
-    const participationArray = Object.values(participationData).map(playerData => {
-        const totalMatches = playerData.totalParticipated + playerData.totalNotParticipated;
-        const participationRate = totalMatches > 0 
-            ? parseFloat(((playerData.totalParticipated / totalMatches) * 100).toFixed(1))
-            : 0.0;
-        return {
-            ...playerData,
-            participationRate: participationRate
-        };
-    });
-    
-    // Sort by participation rate if needed
+
     if (participationTableSortState.column === 'rate') {
         participationArray.sort((a, b) => {
             if (participationTableSortState.direction === 'desc') {
-                return b.participationRate - a.participationRate; // High to low
-            } else {
-                return a.participationRate - b.participationRate; // Low to high
+                return b.participationRate - a.participationRate;
             }
+            return a.participationRate - b.participationRate;
         });
     }
-    
-    // Build table rows
+
     let tableRows = '';
     participationArray.forEach(playerData => {
         let rowCells = `<td><strong>${escapeHtml(playerData.name)}</strong></td>`;
-        
-        // Add participation status for each match date
+
         allMatchDates.forEach(date => {
             const status = playerData.matches[date] !== undefined ? playerData.matches[date] : 0;
             const statusClass = status === 1 ? 'participation-yes' : 'participation-no';
             rowCells += `<td class="${statusClass}">${status}</td>`;
         });
-        
-        // Format participation rate
+
         const participationRateText = playerData.participationRate.toFixed(1);
-        
-        // Color: red if < 50%, blue otherwise
-        const rateColor = playerData.participationRate < 50 ? '#dc3545' : '#667eea';
-        
-        // Add totals with classes for sticky positioning (order: Tổng tham gia, Tổng không tham gia, Tỉ lệ tham gia)
+        const rateColor = playerData.participationRate < 50 ? '#dc3545' : '#4F46E5';
+
         rowCells += `<td class="participation-total-participated"><strong style="color: #28a745;">${playerData.totalParticipated}</strong></td>`;
         rowCells += `<td class="participation-total-not-participated"><strong style="color: #dc3545;">${playerData.totalNotParticipated}</strong></td>`;
         rowCells += `<td class="participation-rate"><strong style="color: ${rateColor};">${participationRateText}%</strong></td>`;
-        
+
         tableRows += `<tr>${rowCells}</tr>`;
     });
-    
-    // Build date headers
+
     let dateHeaders = '';
     if (allMatchDates.length > 0) {
         dateHeaders = allMatchDates.map(date => {
@@ -2695,13 +3675,12 @@ function renderParticipationStatistics(completedMatches) {
             return `<th>${day}/${month}</th>`;
         }).join('');
     }
-    
-    // Sort indicator for participation rate column
+
     const sortIcon = participationTableSortState.direction === 'desc' ? '▼' : '▲';
     const sortStyle = 'cursor: pointer; user-select: none;';
 
     const participationCards = participationArray.map(playerData => {
-        const rateColor = playerData.participationRate < 50 ? '#dc3545' : '#667eea';
+        const rateColor = playerData.participationRate < 50 ? '#dc3545' : '#4F46E5';
         const detailRows = allMatchDates.map(date => {
             const status = playerData.matches[date] !== undefined ? playerData.matches[date] : 0;
             const dateObj = new Date(date + 'T00:00:00');
@@ -2732,17 +3711,17 @@ function renderParticipationStatistics(completedMatches) {
             </article>
         `;
     }).join('');
-    
+
     container.innerHTML = `
-        <div class="participation-table-scroll">
-            <table class="participation-table">
+        <div class="participation-table-scroll stats-table-scroll">
+            <table class="participation-table stats-analytics-table">
                 <thead>
                     <tr>
                         <th class="participation-player-name">Tên cầu thủ</th>
                         ${dateHeaders}
-                        <th class="participation-total-participated-header" style="background: #28a745; color: white;">V</th>
-                        <th class="participation-total-not-participated-header" style="background: #dc3545; color: white;">X</th>
-                        <th id="participation-rate-header" class="participation-rate-header" style="background: #667eea; color: white; ${sortStyle}" onclick="sortParticipationTable('rate')">
+                        <th class="participation-total-participated-header">V</th>
+                        <th class="participation-total-not-participated-header">X</th>
+                        <th id="participation-rate-header" class="participation-rate-header" style="${sortStyle}" onclick="sortParticipationTable('rate')">
                             % ${sortIcon}
                         </th>
                     </tr>
@@ -2758,19 +3737,23 @@ function renderParticipationStatistics(completedMatches) {
     `;
 }
 
+function renderParticipationStatistics(completedMatches) {
+    const filteredMatches = filterMatchesByPeriod(
+        completedMatches, selectedParticipationMonthFilter, selectedParticipationQuarterFilter
+    );
+    const participationArray = computeParticipationMap(filteredMatches);
+    renderParticipationTable(completedMatches, participationArray, filteredMatches);
+}
+
 function sortParticipationTable(column) {
     if (participationTableSortState.column === column) {
-        // Toggle direction
         participationTableSortState.direction = participationTableSortState.direction === 'desc' ? 'asc' : 'desc';
     } else {
-        // New column, default to desc
         participationTableSortState.column = column;
         participationTableSortState.direction = 'desc';
     }
-    
-    // Re-render the participation table
     const allMatches = matches.filter(m => m.is_completed === true || m.is_completed === 1);
-    renderParticipationStatistics(allMatches);
+    renderStatisticsDashboard(allMatches);
 }
 
 
@@ -2823,16 +3806,18 @@ function logout() {
 }
 
 function updateUIForLogin() {
-    // Show logout button, hide login button
     document.getElementById('login-btn').style.display = 'none';
-    document.getElementById('logout-btn').style.display = 'block';
-    
-    // Show all header action buttons
+    document.getElementById('logout-btn').style.display = 'flex';
+    const authStatus = document.getElementById('profile-auth-status');
+    if (authStatus) authStatus.textContent = 'Quản trị viên';
+
     document.querySelectorAll('.section-header .btn-primary').forEach(btn => {
         btn.style.display = '';
     });
-    
-    // Re-render to show action buttons in cards
+
+    const fab = document.getElementById('fab-add-player');
+    if (fab) fab.style.display = 'flex';
+
     if (players.length > 0) renderPlayers();
     if (opponents.length > 0) renderOpponents();
     if (matches.length > 0) {
@@ -2842,16 +3827,18 @@ function updateUIForLogin() {
 }
 
 function updateUIForLogout() {
-    // Show login button, hide logout button
-    document.getElementById('login-btn').style.display = 'block';
+    document.getElementById('login-btn').style.display = 'flex';
     document.getElementById('logout-btn').style.display = 'none';
-    
-    // Hide all header action buttons
+    const authStatus = document.getElementById('profile-auth-status');
+    if (authStatus) authStatus.textContent = 'Khách';
+
     document.querySelectorAll('.section-header .btn-primary').forEach(btn => {
         btn.style.display = 'none';
     });
-    
-    // Re-render to hide action buttons in cards
+
+    const fab = document.getElementById('fab-add-player');
+    if (fab) fab.style.display = 'none';
+
     if (players.length > 0) renderPlayers();
     if (opponents.length > 0) renderOpponents();
     if (matches.length > 0) {

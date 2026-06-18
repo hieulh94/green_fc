@@ -18,45 +18,60 @@ class MatchService:
 
     def _match_to_response(self, match: Match) -> MatchResponse:
         """Convert Match model to MatchResponse with participant_ids, goals, and opponent"""
-        # Get participant_ids
+        return self._matches_to_responses([match])[0]
+
+    def _matches_to_responses(self, matches: List[Match]) -> List[MatchResponse]:
+        if not matches:
+            return []
+
+        match_ids = [match.id for match in matches]
         participant_repo = MatchParticipantRepository(self.db)
-        participant_ids = participant_repo.get_player_ids_by_match_id(match.id)
-        
-        # Get goals
         goal_repo = MatchGoalRepository(self.db)
-        goals_docs = goal_repo.get_by_match_id(match.id)
-        
-        # Get opponent
         opponent_repo = OpponentRepository(self.db)
-        opponent = opponent_repo.get_by_id(match.opponent_id)
-        
-        # Get player info for goals
         player_repo = PlayerRepository(self.db)
-        goals_response = []
-        for goal_doc in goals_docs:
-            player = player_repo.get_by_id(goal_doc.player_id)
-            goal_response = MatchGoalResponse(
-                id=goal_doc.id,
-                match_id=goal_doc.match_id,
-                player_id=goal_doc.player_id,
-                goals=goal_doc.goals,
-                player_name=player.name if player else None,
-                player_jersey_number=player.jersey_number if player else None
-            )
-            goals_response.append(goal_response)
-        
-        match_dict = match.model_dump()
-        match_dict["participant_ids"] = participant_ids
-        match_dict["goals"] = goals_response
-        if opponent:
-            from app.schemas.opponent import OpponentResponse
-            match_dict["opponent"] = OpponentResponse.model_validate(opponent)
-        
-        return MatchResponse.model_validate(match_dict)
+
+        participants_by_match = participant_repo.get_player_ids_by_match_ids(match_ids)
+        goals_by_match = goal_repo.get_by_match_ids(match_ids)
+
+        opponent_ids = list({match.opponent_id for match in matches if match.opponent_id})
+        opponents_by_id = opponent_repo.get_by_ids(opponent_ids)
+
+        player_ids = {
+            goal_doc.player_id
+            for goals in goals_by_match.values()
+            for goal_doc in goals
+        }
+        players_by_id = player_repo.get_by_ids(list(player_ids))
+
+        from app.schemas.opponent import OpponentResponse
+
+        responses: List[MatchResponse] = []
+        for match in matches:
+            goals_response = []
+            for goal_doc in goals_by_match.get(match.id, []):
+                player = players_by_id.get(goal_doc.player_id)
+                goals_response.append(MatchGoalResponse(
+                    id=goal_doc.id,
+                    match_id=goal_doc.match_id,
+                    player_id=goal_doc.player_id,
+                    goals=goal_doc.goals,
+                    player_name=player.name if player else None,
+                    player_jersey_number=player.jersey_number if player else None
+                ))
+
+            match_dict = match.model_dump()
+            match_dict["participant_ids"] = participants_by_match.get(match.id, [])
+            match_dict["goals"] = goals_response
+            opponent = opponents_by_id.get(match.opponent_id)
+            if opponent:
+                match_dict["opponent"] = OpponentResponse.model_validate(opponent)
+            responses.append(MatchResponse.model_validate(match_dict))
+
+        return responses
 
     def get_matches(self, skip: int = 0, limit: int = 100, opponent_id: Optional[str] = None) -> List[MatchResponse]:
         matches = self.repository.get_all(skip=skip, limit=limit, opponent_id=opponent_id)
-        return [self._match_to_response(match) for match in matches]
+        return self._matches_to_responses(matches)
 
     def get_match(self, match_id: str) -> MatchResponse | None:
         match = self.repository.get_by_id(match_id)

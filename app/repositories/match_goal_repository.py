@@ -18,6 +18,21 @@ class MatchGoalRepository:
             goals.append(MatchGoal(**data))
         return goals
 
+    def get_by_match_ids(self, match_ids: List[str]) -> dict[str, List[MatchGoal]]:
+        if not match_ids:
+            return {}
+        grouped: dict[str, List[MatchGoal]] = {match_id: [] for match_id in match_ids}
+        chunk_size = 10
+        for i in range(0, len(match_ids), chunk_size):
+            chunk = match_ids[i:i + chunk_size]
+            docs = self.db.collection(self.collection).where("match_id", "in", chunk).stream()
+            for doc in docs:
+                data = doc.to_dict()
+                data["id"] = doc.id
+                goal = MatchGoal(**data)
+                grouped.setdefault(goal.match_id, []).append(goal)
+        return grouped
+
     def get_by_id(self, goal_id: str) -> Optional[MatchGoal]:
         doc = self.db.collection(self.collection).document(goal_id).get()
         if not doc.exists:

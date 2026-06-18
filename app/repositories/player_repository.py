@@ -17,6 +17,18 @@ class PlayerRepository:
         data["id"] = doc.id
         return Player(**data)
 
+    def get_by_ids(self, player_ids: List[str]) -> dict[str, Player]:
+        if not player_ids:
+            return {}
+        refs = [self.db.collection(self.collection).document(player_id) for player_id in player_ids]
+        players: dict[str, Player] = {}
+        for doc in self.db.get_all(refs):
+            if doc.exists:
+                data = doc.to_dict()
+                data["id"] = doc.id
+                players[doc.id] = Player(**data)
+        return players
+
     def get_all(self, skip: int = 0, limit: int = 100, team_id: Optional[str] = None) -> List[Player]:
         query = self.db.collection(self.collection)
         if team_id:
