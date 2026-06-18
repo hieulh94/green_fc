@@ -3306,7 +3306,7 @@ async function deleteMatch(id) {
     try {
         await matchesAPI.delete(id);
         invalidateMatchesCache();
-        await loadMatches(true);
+        await Promise.all([loadMatches(true), loadPlayers(true)]);
         // Update opponents to refresh head-to-head records
         if (opponents.length > 0) renderOpponents();
     } catch (error) {
@@ -3611,7 +3611,7 @@ async function saveMatchResult(event) {
         await matchesAPI.updateResult(editingMatchResultId, resultData);
         invalidateMatchesCache();
         closeMatchResultModal();
-        await loadMatches(true);
+        await Promise.all([loadMatches(true), loadPlayers(true)]);
         // Update opponents to refresh head-to-head records
         if (opponents.length > 0) renderOpponents();
     } catch (error) {

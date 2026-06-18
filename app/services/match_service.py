@@ -90,6 +90,10 @@ class MatchService:
         return self._match_to_response(db_match)
 
     def delete_match(self, match_id: str) -> bool:
+        goal_repository = MatchGoalRepository(self.db)
+        participant_repository = MatchParticipantRepository(self.db)
+        goal_repository.delete_by_match_id(match_id)
+        participant_repository.delete_by_match_id(match_id)
         return self.repository.delete(match_id)
 
     def get_statistics(self) -> dict:

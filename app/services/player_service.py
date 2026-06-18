@@ -4,6 +4,7 @@ from typing import List, Optional
 from app.repositories.player_repository import PlayerRepository
 from app.repositories.team_repository import TeamRepository
 from app.repositories.match_goal_repository import MatchGoalRepository
+from app.repositories.match_repository import MatchRepository
 from app.schemas.player import PlayerCreate, PlayerUpdate, PlayerResponse
 
 
@@ -12,15 +13,37 @@ class PlayerService:
         self.repository = PlayerRepository(db)
         self.team_repository = TeamRepository(db)
         self.goal_repository = MatchGoalRepository(db)
+        self.match_repository = MatchRepository(db)
         self.db = db
 
+    def _get_completed_match_ids(self) -> set[str]:
+        matches = self.match_repository.get_all(skip=0, limit=10000)
+        return {match.id for match in matches if match.is_completed}
+
+    def _calculate_all_total_goals(self) -> dict[str, int]:
+        """Sum goals per player from completed matches only."""
+        completed_match_ids = self._get_completed_match_ids()
+        totals: dict[str, int] = {}
+        for goal_doc in self.db.collection("match_goals").stream():
+            data = goal_doc.to_dict()
+            match_id = data.get("match_id")
+            if match_id not in completed_match_ids:
+                continue
+            player_id = data.get("player_id")
+            if not player_id:
+                continue
+            totals[player_id] = totals.get(player_id, 0) + data.get("goals", 0)
+        return totals
+
     def _calculate_total_goals(self, player_id: str) -> int:
-        """Calculate total goals for a player from match_goals"""
-        goals = self.goal_repository.db.collection("match_goals").where("player_id", "==", player_id).stream()
+        """Calculate total goals for a player from completed matches only."""
+        completed_match_ids = self._get_completed_match_ids()
+        goals = self.db.collection("match_goals").where("player_id", "==", player_id).stream()
         total = 0
         for goal_doc in goals:
             data = goal_doc.to_dict()
-            total += data.get("goals", 0)
+            if data.get("match_id") in completed_match_ids:
+                total += data.get("goals", 0)
         return total
 
     def get_player(self, player_id: str) -> Optional[PlayerResponse]:
@@ -36,12 +59,11 @@ class PlayerService:
 
     def get_players(self, skip: int = 0, limit: int = 100, team_id: Optional[str] = None) -> List[PlayerResponse]:
         players = self.repository.get_all(skip=skip, limit=limit, team_id=team_id)
-        
-        # Calculate total_goals for each player
+        goal_totals = self._calculate_all_total_goals()
+
         result = []
         for player in players:
-            total_goals = self._calculate_total_goals(player.id)
-            player.total_goals = total_goals
+            player.total_goals = goal_totals.get(player.id, 0)
             result.append(PlayerResponse.model_validate(player))
         
         return result

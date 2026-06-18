@@ -1549,7 +1549,7 @@ function renderTopScorersPodium(playerGoalsMap, participationById, completedMatc
     const medalIcons = ['🥇', '🥈', '🥉'];
 
     const cards = topPlayers.map((player, rankIdx) => {
-        const part = player.id ? participationById[player.id] : null;
+        const part = player.id ? participationById[String(player.id)] : null;
         const partRate = part ? part.participationRate.toFixed(0) : '—';
         const trend = player.id ? getPlayerGoalTrend(player, completedMatches) : { dir: 'flat', label: '—' };
         const trendIcon = trend.dir === 'up' ? '↑' : trend.dir === 'down' ? '↓' : '→';
@@ -3306,7 +3306,7 @@ async function deleteMatch(id) {
     try {
         await matchesAPI.delete(id);
         invalidateMatchesCache();
-        await loadMatches(true);
+        await Promise.all([loadMatches(true), loadPlayers(true)]);
         // Update opponents to refresh head-to-head records
         if (opponents.length > 0) renderOpponents();
     } catch (error) {
@@ -3611,7 +3611,7 @@ async function saveMatchResult(event) {
         await matchesAPI.updateResult(editingMatchResultId, resultData);
         invalidateMatchesCache();
         closeMatchResultModal();
-        await loadMatches(true);
+        await Promise.all([loadMatches(true), loadPlayers(true)]);
         // Update opponents to refresh head-to-head records
         if (opponents.length > 0) renderOpponents();
     } catch (error) {
