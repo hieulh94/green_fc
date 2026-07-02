@@ -157,6 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Safety net: never leave the loading overlay stuck if an API hangs
     setTimeout(resetLoading, 20000);
     setupTabChangeListeners();
+    scrollActiveSubTabIntoView();
     
     // Add click listener to header brand
     const headerBrand = document.querySelector('.header-brand');
@@ -185,6 +186,10 @@ function setupTabs() {
             
             tabContents.forEach(content => content.classList.remove('active'));
             document.getElementById(`${tabName}-tab`).classList.add('active');
+
+            if (tabName === 'schedule') {
+                scrollActiveSubTabIntoView();
+            }
         });
     });
 }
@@ -2369,6 +2374,15 @@ function switchScheduleSubTab(tab) {
             content.classList.remove('active');
         }
     });
+
+    scrollActiveSubTabIntoView();
+}
+
+function scrollActiveSubTabIntoView() {
+    const active = document.querySelector('.schedule-page .sub-tabs .sub-tab-btn.active');
+    if (active) {
+        active.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
 }
 
 function getPlayerName(playerId) {
@@ -3426,6 +3440,59 @@ function updateMatchResultPreview() {
     badge.className = `mrm-result-badge mrm-result-badge--${result}`;
 }
 
+function updateMatchGoalsSummary() {
+    const ourScore = parseInt(document.getElementById('match-our-score')?.value, 10) || 0;
+    const totalEl = document.getElementById('match-goals-total');
+    const addBtn = document.getElementById('match-add-goal-btn');
+
+    let assignedGoals = 0;
+    document.querySelectorAll('#match-goals-container .goal-entry-row').forEach(row => {
+        const playerId = row.querySelector('select')?.value;
+        const count = parseInt(row.querySelector('.mrm-goal-count')?.value, 10) || 0;
+        if (playerId && count > 0) assignedGoals += count;
+    });
+
+    if (totalEl) {
+        totalEl.textContent = assignedGoals > 0 ? `${assignedGoals}/${ourScore} bàn` : `${ourScore} bàn`;
+        totalEl.classList.toggle('mrm-goals-total--over', assignedGoals > ourScore);
+    }
+
+    const usedRows = document.querySelectorAll('#match-goals-container .goal-entry-row').length;
+    const canAddMore = usedRows < players.length;
+
+    if (addBtn) {
+        addBtn.disabled = !canAddMore;
+        addBtn.title = canAddMore ? 'Thêm cầu thủ ghi bàn' : 'Đã thêm hết cầu thủ';
+    }
+}
+
+function getGoalRowsPlayerIds(excludeSelect = null) {
+    const ids = new Set();
+    document.querySelectorAll('#match-goals-container .goal-entry-row select').forEach(sel => {
+        if (sel !== excludeSelect && sel.value) ids.add(sel.value);
+    });
+    return ids;
+}
+
+function refreshGoalEntryPlayerOptions() {
+    document.querySelectorAll('#match-goals-container .goal-entry-row').forEach(row => {
+        const select = row.querySelector('select');
+        if (!select) return;
+
+        const currentValue = select.value;
+        const usedIds = getGoalRowsPlayerIds(select);
+
+        select.innerHTML = '<option value="">Chọn cầu thủ</option>' +
+            players.map(p => {
+                const id = String(p.id);
+                if (usedIds.has(id)) return '';
+                const selected = String(currentValue) === id ? 'selected' : '';
+                return `<option value="${p.id}" ${selected}>${escapeHtml(p.name)}${p.jersey_number ? ` (#${p.jersey_number})` : ''}</option>`;
+            }).join('');
+    });
+    updateMatchGoalsSummary();
+}
+
 function openMatchResultModal(matchId) {
     editingMatchResultId = matchId;
     const modal = document.getElementById('match-result-modal');
@@ -3468,10 +3535,12 @@ function openMatchResultModal(matchId) {
     
     if (match.goals && match.goals.length > 0) {
         match.goals.forEach(goal => {
-            addGoalEntryRow(goal.player_id, goal.goals);
+            addGoalEntryRow(goal.player_id, goal.goals || 1);
         });
     }
-    
+
+    refreshGoalEntryPlayerOptions();
+    updateMatchGoalsSummary();
     modal.classList.add('active');
 }
 
@@ -3530,12 +3599,33 @@ function closeMatchResultModal() {
 }
 
 function addGoalEntry() {
+    const usedRows = document.querySelectorAll('#match-goals-container .goal-entry-row').length;
+    if (usedRows >= players.length) {
+        alert('Đã thêm hết cầu thủ ghi bàn');
+        return;
+    }
     addGoalEntryRow(null, 1);
 }
 
 function removeGoalEntryRow(goalRow) {
+    if (!goalRow?.parentNode) return;
+
+    goalRow.querySelectorAll('[required]').forEach(el => el.removeAttribute('required'));
+
+    const removeRow = () => {
+        if (goalRow.parentNode) goalRow.remove();
+        refreshGoalEntryPlayerOptions();
+    };
+
     goalRow.classList.add('mrm-row-exit');
-    goalRow.addEventListener('animationend', () => goalRow.remove(), { once: true });
+    goalRow.addEventListener('animationend', (event) => {
+        if (event.target === goalRow && event.animationName === 'mrm-row-exit') {
+            removeRow();
+        }
+    }, { once: true });
+
+    // Fallback when animationend does not fire (reduced motion, browser quirks)
+    window.setTimeout(removeRow, 180);
 }
 
 function addGoalEntryRow(playerId = null, goals = 1) {
@@ -3544,31 +3634,37 @@ function addGoalEntryRow(playerId = null, goals = 1) {
     goalRow.className = 'goal-entry-row mrm-goal-row';
     
     const playerSelect = document.createElement('select');
-    playerSelect.required = true;
     playerSelect.setAttribute('aria-label', 'Chọn cầu thủ ghi bàn');
-    playerSelect.innerHTML = '<option value="">Chọn cầu thủ</option>' + 
-        players.map(p => `<option value="${p.id}" ${playerId === p.id ? 'selected' : ''}>${escapeHtml(p.name)}${p.jersey_number ? ` (#${p.jersey_number})` : ''}</option>`).join('');
+    playerSelect.innerHTML = '<option value="">Chọn cầu thủ</option>' +
+        players.map(p => `<option value="${p.id}" ${String(playerId) === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name)}${p.jersey_number ? ` (#${p.jersey_number})` : ''}</option>`).join('');
+    playerSelect.addEventListener('change', refreshGoalEntryPlayerOptions);
     
     const goalsInput = document.createElement('input');
     goalsInput.type = 'number';
     goalsInput.min = '1';
-    goalsInput.value = goals;
+    goalsInput.value = Math.max(1, parseInt(goals, 10) || 1);
     goalsInput.required = true;
     goalsInput.placeholder = 'Số bàn';
     goalsInput.className = 'mrm-goal-count';
     goalsInput.setAttribute('aria-label', 'Số bàn thắng');
+    goalsInput.addEventListener('input', updateMatchGoalsSummary);
     
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'mrm-goal-remove';
     removeBtn.setAttribute('aria-label', 'Xóa cầu thủ ghi bàn');
     removeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-    removeBtn.onclick = () => removeGoalEntryRow(goalRow);
+    removeBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        removeGoalEntryRow(goalRow);
+    });
     
     goalRow.appendChild(playerSelect);
     goalRow.appendChild(goalsInput);
     goalRow.appendChild(removeBtn);
     container.appendChild(goalRow);
+    refreshGoalEntryPlayerOptions();
 }
 
 async function saveMatchResult(event) {
@@ -3592,13 +3688,23 @@ async function saveMatchResult(event) {
         
         const goalRows = document.querySelectorAll('.goal-entry-row');
         const goals = [];
+        const seenPlayerIds = new Set();
+
         goalRows.forEach(row => {
-            const playerId = row.querySelector('select').value;
-            const goalsCount = parseInt(row.querySelector('input[type="number"]').value);
-            if (playerId && goalsCount > 0) {
-                goals.push({ player_id: playerId, goals: goalsCount });
-            }
+            const playerId = row.querySelector('select')?.value;
+            const goalsCount = parseInt(row.querySelector('.mrm-goal-count')?.value, 10);
+            if (!playerId || !goalsCount || goalsCount <= 0) return;
+            if (seenPlayerIds.has(playerId)) return;
+            seenPlayerIds.add(playerId);
+            goals.push({ player_id: playerId, goals: goalsCount });
         });
+
+        const totalAssigned = goals.reduce((sum, goal) => sum + goal.goals, 0);
+        if (goals.length > 0 && totalAssigned > ourScore) {
+            alert(`Tổng bàn ghi bàn (${totalAssigned}) không được vượt quá tỉ số FC Green (${ourScore})`);
+            hideLoading();
+            return;
+        }
         
         const resultData = {
             result: result,

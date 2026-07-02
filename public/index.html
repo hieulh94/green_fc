@@ -174,7 +174,7 @@
         </div>
 
         <!-- Schedule Tab -->
-        <div id="schedule-tab" class="tab-content">
+        <div id="schedule-tab" class="tab-content schedule-page">
             <div class="section-header">
                 <h2>Lịch thi đấu</h2>
                 <button class="btn btn-primary" onclick="openMatchModal()">+ Thêm lịch thi đấu</button>
@@ -402,7 +402,7 @@
                                         </div>
                                         <span class="mrm-team-name">FC Green</span>
                                     </div>
-                                    <input type="number" id="match-our-score" class="mrm-score-input" min="0" required inputmode="numeric" aria-label="Tỉ số FC Green" oninput="updateMatchResultPreview()">
+                                    <input type="number" id="match-our-score" class="mrm-score-input" min="0" required inputmode="numeric" aria-label="Tỉ số FC Green" oninput="updateMatchResultPreview(); updateMatchGoalsSummary();">
                                 </div>
                                 <div class="mrm-vs" aria-hidden="true">VS</div>
                                 <div class="mrm-team-card mrm-team-card--away">
@@ -424,11 +424,15 @@
                         </section>
 
                         <section class="mrm-section">
-                            <h3 class="mrm-section-title">Cầu thủ ghi bàn</h3>
+                            <div class="mrm-goals-header">
+                                <h3 class="mrm-section-title">Cầu thủ ghi bàn (FC Green)</h3>
+                                <span id="match-goals-total" class="mrm-goals-total" aria-live="polite">0 bàn</span>
+                            </div>
+                            <p class="mrm-helper">Chọn cầu thủ và nhập số bàn. Mỗi cầu thủ chỉ cần một dòng (tùy chọn).</p>
                             <div id="match-goals-container" class="mrm-goals-list">
                                 <!-- Goal entries will be added here dynamically -->
                             </div>
-                            <button type="button" class="mrm-add-goal-btn" onclick="addGoalEntry()">
+                            <button type="button" class="mrm-add-goal-btn" id="match-add-goal-btn" onclick="addGoalEntry()">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                 Thêm cầu thủ ghi bàn
                             </button>
